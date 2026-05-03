@@ -1,54 +1,53 @@
+# ============================================================
+# app.py
+# Fast Streamlit Dashboard
+# Loads pre-trained model/result files from result/
+# ============================================================
+
 import os
-import glob
 import time
 from datetime import datetime, timedelta
 
+import joblib
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import streamlit as st
-
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-
-# ============================================================
-# Streamlit Page Config
-# ============================================================
 
 st.set_page_config(
     page_title="Seoul Weather ML Dashboard",
     page_icon="🌤️",
     layout="wide",
 )
+
 def load_css(file_path: str):
-    with open(file_path, encoding="utf-8") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    if os.path.exists(file_path):
+        with open(file_path, encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 load_css("style.css")
 
+
 # ============================================================
-# Path Settings
+# Paths
 # ============================================================
 
-DATA_DIR = "data"
 RESULT_DIR = "result"
-os.makedirs(RESULT_DIR, exist_ok=True)
+
+MODEL_PATH = os.path.join(RESULT_DIR, "seoul_temperature_model.joblib")
+PERFORMANCE_PATH = os.path.join(RESULT_DIR, "model_performance_comparison.csv")
+PREDICTION_PATH = os.path.join(RESULT_DIR, "temperature_prediction_result.csv")
+SUMMARY_PATH = os.path.join(RESULT_DIR, "project_summary.csv")
+FEATURE_PATH = os.path.join(RESULT_DIR, "feature_importance.csv")
+PROCESSED_PATH = os.path.join(RESULT_DIR, "seoul_weather_processed_dataset.csv")
 
 API_URL = "https://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList"
 SEOUL_STATION_ID = "108"
-
 PREDICT_HOUR = 1
-TRAIN_RATIO = 0.8
-RANDOM_STATE = 42
-
-
-# ============================================================
-# Column Settings
-# ============================================================
 
 REQUIRED_COLUMNS = [
     "지점",
@@ -80,88 +79,19 @@ INTERPOLATE_COLUMNS = [
     "해면기압(hPa)",
 ]
 
-FEATURE_COLUMNS = [
-    "기온(°C)",
-    "강수량(mm)",
-    "풍속(m/s)",
-    "습도(%)",
-    "현지기압(hPa)",
-    "해면기압(hPa)",
-    "rain_yesno",
-    "hour_sin",
-    "hour_cos",
-    "month_sin",
-    "month_cos",
-    "season",
-    "temp_1h_ago",
-    "temp_3h_ago",
-    "temp_6h_ago",
-    "temp_12h_ago",
-    "temp_24h_ago",
-    "temp_48h_ago",
-    "humidity_1h_ago",
-    "pressure_1h_ago",
-    "wind_1h_ago",
-    "temp_diff_1h",
-    "temp_diff_3h",
-    "pressure_diff_1h",
-    "temp_rolling_3h",
-    "temp_rolling_6h",
-    "humidity_rolling_3h",
-    "pressure_rolling_3h",
-    "temp_std_6h",
-]
-
-FEATURE_NAME_MAP = {
-    "기온(°C)": "Current Temperature",
-    "강수량(mm)": "Rainfall",
-    "풍속(m/s)": "Wind Speed",
-    "습도(%)": "Humidity",
-    "현지기압(hPa)": "Local Pressure",
-    "해면기압(hPa)": "Sea-Level Pressure",
-    "rain_yesno": "Rain Indicator",
-    "hour_sin": "Hour Sin",
-    "hour_cos": "Hour Cos",
-    "month_sin": "Month Sin",
-    "month_cos": "Month Cos",
-    "season": "Season",
-    "temp_1h_ago": "Temperature 1h Ago",
-    "temp_3h_ago": "Temperature 3h Ago",
-    "temp_6h_ago": "Temperature 6h Ago",
-    "temp_12h_ago": "Temperature 12h Ago",
-    "temp_24h_ago": "Temperature 24h Ago",
-    "temp_48h_ago": "Temperature 48h Ago",
-    "humidity_1h_ago": "Humidity 1h Ago",
-    "pressure_1h_ago": "Pressure 1h Ago",
-    "wind_1h_ago": "Wind Speed 1h Ago",
-    "temp_diff_1h": "Temperature Change 1h",
-    "temp_diff_3h": "Temperature Change 3h",
-    "pressure_diff_1h": "Pressure Change 1h",
-    "temp_rolling_3h": "Temperature Rolling Mean 3h",
-    "temp_rolling_6h": "Temperature Rolling Mean 6h",
-    "humidity_rolling_3h": "Humidity Rolling Mean 3h",
-    "pressure_rolling_3h": "Pressure Rolling Mean 3h",
-    "temp_std_6h": "Temperature Std 6h",
-}
-
 
 # ============================================================
-# Utility Functions
+# Utility
 # ============================================================
 
-def read_weather_csv(file_path: str) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(file_path, encoding="utf-8-sig")
-    except UnicodeDecodeError:
-        df = pd.read_csv(file_path, encoding="cp949")
+@st.cache_data
+def load_csv(path: str) -> pd.DataFrame:
+    return pd.read_csv(path, encoding="utf-8-sig")
 
-    df.columns = [str(col).strip() for col in df.columns]
 
-    missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
-    if missing_cols:
-        raise ValueError(f"{os.path.basename(file_path)} missing columns: {missing_cols}")
-
-    return df[REQUIRED_COLUMNS].copy()
+@st.cache_resource
+def load_model_bundle():
+    return joblib.load(MODEL_PATH)
 
 
 def make_season(month: int) -> int:
@@ -174,16 +104,7 @@ def make_season(month: int) -> int:
     return 3
 
 
-def add_features(df: pd.DataFrame, predict_hour: int = 1) -> tuple[pd.DataFrame, str, str]:
-    """
-    Feature engineering.
-
-    This version predicts temperature change instead of direct temperature:
-        target_change = temperature_after_1h - current_temperature
-
-    Final temperature prediction:
-        predicted_temperature = current_temperature + predicted_change
-    """
+def add_features(df: pd.DataFrame, predict_hour: int = 1):
     df = df.copy()
 
     df["hour"] = df["일시"].dt.hour
@@ -230,214 +151,16 @@ def add_features(df: pd.DataFrame, predict_hour: int = 1) -> tuple[pd.DataFrame,
     return df, target_change_col, actual_temp_col
 
 
-def load_and_preprocess_data(data_dir: str) -> pd.DataFrame:
-    csv_files = sorted(glob.glob(os.path.join(data_dir, "*.csv")))
-
-    if len(csv_files) == 0:
-        raise FileNotFoundError(
-            "No CSV files found in the data folder. "
-            "Upload your Seoul ASOS CSV files to the data/ folder in GitHub."
-        )
-
-    df_list = []
-    for file_path in csv_files:
-        temp_df = read_weather_csv(file_path)
-        temp_df["source_file"] = os.path.basename(file_path)
-        df_list.append(temp_df)
-
-    weather_raw = pd.concat(df_list, ignore_index=True)
-
-    weather = weather_raw.copy()
-    weather["일시"] = pd.to_datetime(weather["일시"], errors="coerce")
-    weather = weather.dropna(subset=["일시"]).copy()
-
-    if weather.empty:
-        raise ValueError(
-            "No valid datetime rows were found. Please check that the CSV files in data/ contain the column '일시'."
-        )
-
-    for col in NUMERIC_COLUMNS:
-        weather[col] = pd.to_numeric(weather[col], errors="coerce")
-
-    weather = weather[weather["지점"] == 108].copy()
-    weather = weather.sort_values("일시").reset_index(drop=True)
-    weather = weather.drop_duplicates(subset=["일시"], keep="first").reset_index(drop=True)
-
-    weather = weather.set_index("일시").sort_index()
-
-    full_time_index = pd.date_range(
-        start=weather.index.min(),
-        end=weather.index.max(),
-        freq="h"
-    )
-
-    weather = weather.reindex(full_time_index)
-    weather.index.name = "일시"
-    weather = weather.reset_index()
-
-    weather["지점"] = 108
-    weather["지점명"] = "서울"
-    weather["강수량(mm)"] = weather["강수량(mm)"].fillna(0)
-
-    for col in INTERPOLATE_COLUMNS:
-        weather[col] = weather[col].interpolate(method="linear")
-        weather[col] = weather[col].ffill().bfill()
-
-    return weather
-
-
-def train_models(weather: pd.DataFrame) -> dict:
-    weather, target_change_col, actual_temp_col = add_features(weather, predict_hour=PREDICT_HOUR)
-    weather_model = weather.dropna().reset_index(drop=True)
-
-    X = weather_model[FEATURE_COLUMNS]
-    y_change = weather_model[target_change_col]
-    actual_future_temp = weather_model[actual_temp_col]
-    current_temp = weather_model["기온(°C)"]
-
-    split_index = int(len(weather_model) * TRAIN_RATIO)
-
-    X_train = X.iloc[:split_index]
-    X_test = X.iloc[split_index:]
-
-    y_train = y_change.iloc[:split_index]
-    y_test_change = y_change.iloc[split_index:]
-
-    actual_future_temp_test = actual_future_temp.iloc[split_index:]
-    current_temp_test = current_temp.iloc[split_index:]
-    test_time = weather_model["일시"].iloc[split_index:]
-
-    # Baseline: future temperature = current temperature
-    baseline_temp_pred = current_temp_test.values
-    baseline_change_pred = np.zeros(len(current_temp_test))
-
-    results = {
-        "Persistence Baseline": {
-            "model": None,
-            "change_prediction": baseline_change_pred,
-            "temperature_prediction": baseline_temp_pred,
-            "MAE": mean_absolute_error(actual_future_temp_test, baseline_temp_pred),
-            "RMSE": np.sqrt(mean_squared_error(actual_future_temp_test, baseline_temp_pred)),
-            "R2": r2_score(actual_future_temp_test, baseline_temp_pred),
-        }
-    }
-
-    models = {
-        "Linear Regression": LinearRegression(),
-        "Random Forest Light": RandomForestRegressor(
-            n_estimators=30,
-            max_depth=12,
-            min_samples_leaf=3,
-            random_state=RANDOM_STATE,
-            n_jobs=-1,
-        ),
-        "Gradient Boosting Tuned": GradientBoostingRegressor(
-            n_estimators=500,
-            learning_rate=0.03,
-            max_depth=3,
-            min_samples_leaf=5,
-            subsample=0.8,
-            random_state=RANDOM_STATE,
-        ),
-    }
-
-    for model_name, model in models.items():
-        model.fit(X_train, y_train)
-        change_pred = model.predict(X_test)
-        temp_pred = current_temp_test.values + change_pred
-
-        results[model_name] = {
-            "model": model,
-            "change_prediction": change_pred,
-            "temperature_prediction": temp_pred,
-            "MAE": mean_absolute_error(actual_future_temp_test, temp_pred),
-            "RMSE": np.sqrt(mean_squared_error(actual_future_temp_test, temp_pred)),
-            "R2": r2_score(actual_future_temp_test, temp_pred),
-        }
-
-    performance_df = pd.DataFrame({
-        "Model": list(results.keys()),
-        "MAE": [results[name]["MAE"] for name in results],
-        "RMSE": [results[name]["RMSE"] for name in results],
-        "R2": [results[name]["R2"] for name in results],
-    }).sort_values("RMSE").reset_index(drop=True)
-
-    ml_performance_df = performance_df[performance_df["Model"] != "Persistence Baseline"].reset_index(drop=True)
-    best_model_name = ml_performance_df.iloc[0]["Model"]
-
-    # Deployment model preference:
-    # If Random Forest Light is best and still light enough in runtime, use it.
-    # Otherwise use tuned Gradient Boosting.
-    deploy_model_name = best_model_name
-    if deploy_model_name == "Linear Regression":
-        deploy_model_name = "Gradient Boosting Tuned"
-
-    deploy_result = results[deploy_model_name]
-
-    prediction_df = pd.DataFrame({
-        "Time": test_time.values,
-        "Current_Temperature": current_temp_test.values,
-        "Actual_Temperature": actual_future_temp_test.values,
-        "Predicted_Temperature": deploy_result["temperature_prediction"],
-        "Predicted_Change": deploy_result["change_prediction"],
-        "Error": actual_future_temp_test.values - deploy_result["temperature_prediction"],
-        "Absolute_Error": np.abs(actual_future_temp_test.values - deploy_result["temperature_prediction"]),
-    })
-
-    summary_df = pd.DataFrame([{
-        "best_model": best_model_name,
-        "deploy_model": deploy_model_name,
-        "predict_hour": PREDICT_HOUR,
-        "train_start": weather_model["일시"].iloc[0],
-        "train_end": weather_model["일시"].iloc[split_index - 1],
-        "test_start": weather_model["일시"].iloc[split_index],
-        "test_end": weather_model["일시"].iloc[-1],
-        "mae": deploy_result["MAE"],
-        "rmse": deploy_result["RMSE"],
-        "r2": deploy_result["R2"],
-        "baseline_mae": results["Persistence Baseline"]["MAE"],
-        "baseline_rmse": results["Persistence Baseline"]["RMSE"],
-        "baseline_r2": results["Persistence Baseline"]["R2"],
-    }])
-
-    deploy_model = deploy_result["model"]
-
-    if hasattr(deploy_model, "feature_importances_"):
-        feature_importance_df = pd.DataFrame({
-            "Feature": FEATURE_COLUMNS,
-            "Feature_English": [FEATURE_NAME_MAP.get(f, f) for f in FEATURE_COLUMNS],
-            "Importance": deploy_model.feature_importances_,
-        }).sort_values("Importance", ascending=False)
-    elif deploy_model_name == "Linear Regression":
-        feature_importance_df = pd.DataFrame({
-            "Feature": FEATURE_COLUMNS,
-            "Feature_English": [FEATURE_NAME_MAP.get(f, f) for f in FEATURE_COLUMNS],
-            "Importance": np.abs(deploy_model.coef_),
-        }).sort_values("Importance", ascending=False)
-    else:
-        feature_importance_df = pd.DataFrame(columns=["Feature", "Feature_English", "Importance"])
-
-    return {
-        "weather": weather,
-        "weather_model": weather_model,
-        "performance_df": performance_df,
-        "prediction_df": prediction_df,
-        "summary_df": summary_df,
-        "feature_importance_df": feature_importance_df,
-        "model": deploy_model,
-        "model_name": deploy_model_name,
-        "best_model_name": best_model_name,
-        "feature_columns": FEATURE_COLUMNS,
-        "target_change_col": target_change_col,
-        "actual_temp_col": actual_temp_col,
-    }
-
-
-@st.cache_resource(show_spinner="Training models from GitHub data files...")
-def get_pipeline_result() -> dict:
-    weather = load_and_preprocess_data(DATA_DIR)
-    result = train_models(weather)
-    return result
+def ensure_required_files():
+    required = [
+        MODEL_PATH,
+        PERFORMANCE_PATH,
+        PREDICTION_PATH,
+        SUMMARY_PATH,
+        FEATURE_PATH,
+        PROCESSED_PATH,
+    ]
+    return [path for path in required if not os.path.exists(path)]
 
 
 def make_api_params(service_key: str):
@@ -546,17 +269,19 @@ def clean_api_data(api_df: pd.DataFrame) -> pd.DataFrame:
     return api_weather
 
 
-def predict_latest_from_api(api_weather: pd.DataFrame, pipeline: dict) -> dict:
-    model = pipeline["model"]
-    feature_columns = pipeline["feature_columns"]
+def predict_latest_from_api(api_weather: pd.DataFrame, model_bundle: dict):
+    model = model_bundle["model"]
+    feature_columns = model_bundle["feature_columns"]
+    predict_hour = model_bundle.get("predict_hour", 1)
 
     if len(api_weather) < 49:
         raise ValueError("At least 49 hourly records are required because the model uses 48-hour lag features.")
 
-    api_featured, _, _ = add_features(api_weather, predict_hour=PREDICT_HOUR)
+    api_featured, _, _ = add_features(api_weather, predict_hour=predict_hour)
     api_featured = api_featured.dropna().reset_index(drop=True)
 
     latest = api_featured.iloc[-1].copy()
+
     current_time = latest["일시"]
     current_temp = latest["기온(°C)"]
 
@@ -566,18 +291,19 @@ def predict_latest_from_api(api_weather: pd.DataFrame, pipeline: dict) -> dict:
 
     return {
         "base_time": current_time,
-        "target_time": current_time + pd.Timedelta(hours=PREDICT_HOUR),
+        "target_time": current_time + pd.Timedelta(hours=predict_hour),
         "current_temp": current_temp,
         "predicted_change": predicted_change,
         "predicted_temp": predicted_temp,
     }
 
 
-def compare_api_interval(api_weather: pd.DataFrame, pipeline: dict) -> pd.DataFrame:
-    model = pipeline["model"]
-    feature_columns = pipeline["feature_columns"]
+def compare_api_interval(api_weather: pd.DataFrame, model_bundle: dict):
+    model = model_bundle["model"]
+    feature_columns = model_bundle["feature_columns"]
+    predict_hour = model_bundle.get("predict_hour", 1)
 
-    api_compare, target_change_col, actual_temp_col = add_features(api_weather, predict_hour=PREDICT_HOUR)
+    api_compare, _, actual_temp_col = add_features(api_weather, predict_hour=predict_hour)
     api_compare_model = api_compare.dropna().reset_index(drop=True)
 
     X_api = api_compare_model[feature_columns]
@@ -586,7 +312,7 @@ def compare_api_interval(api_weather: pd.DataFrame, pipeline: dict) -> pd.DataFr
 
     compare_result = pd.DataFrame({
         "Base_Time": api_compare_model["일시"],
-        "Prediction_Time": api_compare_model["일시"] + pd.Timedelta(hours=PREDICT_HOUR),
+        "Prediction_Time": api_compare_model["일시"] + pd.Timedelta(hours=predict_hour),
         "Current_Temperature": api_compare_model["기온(°C)"],
         "Actual_Temperature": api_compare_model[actual_temp_col],
         "Predicted_Temperature": predicted_temp,
@@ -611,19 +337,22 @@ st.markdown(
     """
 )
 
-with st.spinner("Loading data and training models from GitHub repository..."):
-    try:
-        pipeline = get_pipeline_result()
-    except Exception as e:
-        st.error("앱 초기화에 실패했습니다.")
-        st.write(e)
-        st.info("GitHub repository의 data/ 폴더에 서울 ASOS CSV 파일들이 들어 있는지 확인하세요.")
-        st.stop()
+missing_files = ensure_required_files()
 
-performance_df = pipeline["performance_df"]
-prediction_df = pipeline["prediction_df"]
-summary_df = pipeline["summary_df"]
-feature_importance_df = pipeline["feature_importance_df"]
+if missing_files:
+    st.error("필수 result 파일이 없습니다. GitHub Actions 학습을 먼저 실행하세요.")
+    st.code("\n".join(missing_files))
+    st.stop()
+
+model_bundle = load_model_bundle()
+performance_df = load_csv(PERFORMANCE_PATH)
+prediction_df = load_csv(PREDICTION_PATH)
+summary_df = load_csv(SUMMARY_PATH)
+feature_importance_df = load_csv(FEATURE_PATH)
+processed_df = load_csv(PROCESSED_PATH)
+
+prediction_df["Time"] = pd.to_datetime(prediction_df["Time"])
+processed_df["일시"] = pd.to_datetime(processed_df["일시"])
 summary = summary_df.iloc[0]
 
 col1, col2, col3, col4 = st.columns(4)
@@ -644,12 +373,10 @@ with tab_overview:
 
     st.markdown(
         """
-        이 버전은 GitHub와 Streamlit만으로 실행되도록 구성되어 있습니다.
-
-        **핵심 개선점**
-        - Colab에서 모델 파일을 따로 저장하지 않아도 됨
-        - GitHub `data/` 폴더의 CSV를 Streamlit에서 직접 읽고 학습
-        - 직접 기온을 예측하는 대신 **1시간 뒤 기온 변화량**을 예측
+        **구성**
+        - GitHub Actions가 `data/` 폴더의 CSV를 읽고 자동 학습
+        - Streamlit은 `result/` 폴더의 모델과 결과 파일만 읽어 빠르게 실행
+        - 직접 기온을 예측하는 대신, **1시간 뒤 기온 변화량**을 예측
         - 최종 기온 = 현재 기온 + 예측 변화량
         - Baseline과 머신러닝 모델 성능 비교
         - API 최신 제공 자료 기반 예측 지원
@@ -661,6 +388,11 @@ with tab_overview:
     c2.metric("Deploy Model RMSE", f"{summary['rmse']:.3f} °C")
     c3.metric("R²", f"{summary['r2']:.4f}")
 
+    st.info(
+        f"Performance-best model: {summary['best_model']} / "
+        f"Deployment model: {summary['deploy_model']}"
+    )
+
     st.warning(
         "ASOS 시간자료 API는 실시간 현재 자료가 아니라 전날 자료까지 제공합니다. "
         "따라서 API 예측은 'API에서 제공되는 최신 관측 시각 기준 1시간 뒤 예측'으로 해석해야 합니다."
@@ -669,7 +401,6 @@ with tab_overview:
 
 with tab_results:
     st.subheader("Model Performance Comparison")
-
     st.dataframe(performance_df, use_container_width=True)
 
     perf_long = performance_df.melt(
@@ -692,27 +423,9 @@ with tab_results:
     st.subheader("Test Data: Actual vs Predicted")
 
     fig_line = go.Figure()
-    fig_line.add_trace(
-        go.Scatter(
-            x=prediction_df["Time"],
-            y=prediction_df["Actual_Temperature"],
-            mode="lines",
-            name="Actual Temperature",
-        )
-    )
-    fig_line.add_trace(
-        go.Scatter(
-            x=prediction_df["Time"],
-            y=prediction_df["Predicted_Temperature"],
-            mode="lines",
-            name="Predicted Temperature",
-        )
-    )
-    fig_line.update_layout(
-        title="Actual vs Predicted Temperature",
-        xaxis_title="Time",
-        yaxis_title="Temperature (°C)",
-    )
+    fig_line.add_trace(go.Scatter(x=prediction_df["Time"], y=prediction_df["Actual_Temperature"], mode="lines", name="Actual Temperature"))
+    fig_line.add_trace(go.Scatter(x=prediction_df["Time"], y=prediction_df["Predicted_Temperature"], mode="lines", name="Predicted Temperature"))
+    fig_line.update_layout(title="Actual vs Predicted Temperature", xaxis_title="Time", yaxis_title="Temperature (°C)")
     st.plotly_chart(fig_line, use_container_width=True)
 
     fig_scatter = px.scatter(
@@ -749,34 +462,20 @@ with tab_results:
     fig_error.add_hline(y=0, line_dash="dash")
     st.plotly_chart(fig_error, use_container_width=True)
 
-    if len(feature_importance_df) > 0:
-        st.subheader("Feature Importance")
-        top_features = feature_importance_df.sort_values("Importance", ascending=False).head(15)
+    st.subheader("Feature Importance")
+    top_features = feature_importance_df.sort_values("Importance", ascending=False).head(15)
+    fig_feature = px.bar(top_features, x="Importance", y="Feature_English", orientation="h", title="Top 15 Feature Importance")
+    fig_feature.update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig_feature, use_container_width=True)
 
-        fig_feature = px.bar(
-            top_features,
-            x="Importance",
-            y="Feature_English",
-            orientation="h",
-            title="Top 15 Feature Importance",
-        )
-        fig_feature.update_layout(yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig_feature, use_container_width=True)
+    no_current_temp = feature_importance_df[
+        feature_importance_df["Feature"] != "기온(°C)"
+    ].sort_values("Importance", ascending=False).head(15)
 
-        no_current_temp = feature_importance_df[
-            feature_importance_df["Feature"] != "기온(°C)"
-        ].sort_values("Importance", ascending=False).head(15)
-
-        st.subheader("Feature Importance Except Current Temperature")
-        fig_no_temp = px.bar(
-            no_current_temp,
-            x="Importance",
-            y="Feature_English",
-            orientation="h",
-            title="Feature Importance Except Current Temperature",
-        )
-        fig_no_temp.update_layout(yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig_no_temp, use_container_width=True)
+    st.subheader("Feature Importance Except Current Temperature")
+    fig_no_temp = px.bar(no_current_temp, x="Importance", y="Feature_English", orientation="h", title="Feature Importance Except Current Temperature")
+    fig_no_temp.update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig_no_temp, use_container_width=True)
 
 
 with tab_api:
@@ -802,23 +501,12 @@ with tab_api:
                     api_df, start_time, end_time = request_asos_api(service_key, retry=5, wait=3)
                     api_weather = clean_api_data(api_df)
 
-                    latest_result = predict_latest_from_api(api_weather, pipeline)
-                    compare_result = compare_api_interval(api_weather, pipeline)
+                    latest_result = predict_latest_from_api(api_weather, model_bundle)
+                    compare_result = compare_api_interval(api_weather, model_bundle)
 
-                    api_mae = mean_absolute_error(
-                        compare_result["Actual_Temperature"],
-                        compare_result["Predicted_Temperature"],
-                    )
-                    api_rmse = np.sqrt(
-                        mean_squared_error(
-                            compare_result["Actual_Temperature"],
-                            compare_result["Predicted_Temperature"],
-                        )
-                    )
-                    api_r2 = r2_score(
-                        compare_result["Actual_Temperature"],
-                        compare_result["Predicted_Temperature"],
-                    )
+                    api_mae = mean_absolute_error(compare_result["Actual_Temperature"], compare_result["Predicted_Temperature"])
+                    api_rmse = np.sqrt(mean_squared_error(compare_result["Actual_Temperature"], compare_result["Predicted_Temperature"]))
+                    api_r2 = r2_score(compare_result["Actual_Temperature"], compare_result["Predicted_Temperature"])
 
                 st.success("API 예측 완료")
 
@@ -835,27 +523,9 @@ with tab_api:
                 m3.metric("API R²", f"{api_r2:.4f}")
 
                 fig_api = go.Figure()
-                fig_api.add_trace(
-                    go.Scatter(
-                        x=compare_result["Prediction_Time"],
-                        y=compare_result["Actual_Temperature"],
-                        mode="lines+markers",
-                        name="Actual",
-                    )
-                )
-                fig_api.add_trace(
-                    go.Scatter(
-                        x=compare_result["Prediction_Time"],
-                        y=compare_result["Predicted_Temperature"],
-                        mode="lines+markers",
-                        name="Predicted",
-                    )
-                )
-                fig_api.update_layout(
-                    title="API Interval: Actual vs Predicted",
-                    xaxis_title="Time",
-                    yaxis_title="Temperature (°C)",
-                )
+                fig_api.add_trace(go.Scatter(x=compare_result["Prediction_Time"], y=compare_result["Actual_Temperature"], mode="lines+markers", name="Actual"))
+                fig_api.add_trace(go.Scatter(x=compare_result["Prediction_Time"], y=compare_result["Predicted_Temperature"], mode="lines+markers", name="Predicted"))
+                fig_api.update_layout(title="API Interval: Actual vs Predicted", xaxis_title="Time", yaxis_title="Temperature (°C)")
                 st.plotly_chart(fig_api, use_container_width=True)
 
                 fig_api_change = px.line(
@@ -873,8 +543,6 @@ with tab_api:
 
             except Exception as e:
                 st.error(f"API prediction failed: {e}")
-
-
 
 
 
@@ -907,11 +575,9 @@ with tab_future:
 
         for step in range(1, horizon_hours + 1):
             featured, _, _ = add_features(future_history, predict_hour=predict_hour)
-
             latest_feature_row = featured.iloc[-1].copy()
 
-            missing_features = latest_feature_row[feature_columns].isna().sum()
-            if missing_features > 0:
+            if latest_feature_row[feature_columns].isna().sum() > 0:
                 raise ValueError("예측에 필요한 파생변수 중 결측값이 있습니다. 데이터 길이를 확인하세요.")
 
             current_time = latest_feature_row["일시"]
@@ -922,8 +588,6 @@ with tab_future:
             predicted_temp = float(current_temp + predicted_change)
 
             next_time = current_time + pd.Timedelta(hours=1)
-
-            # Future exogenous variables are assumptions.
             recent_6h = future_history.tail(6)
 
             if exogenous_mode == "Recent 6-hour average":
@@ -1067,18 +731,15 @@ with tab_future:
         st.error(f"Future forecast failed: {e}")
 
 
-
 with tab_analysis:
     st.subheader("Custom Temperature Analysis")
     st.markdown(
         """
         원하는 날짜 범위와 시간대를 선택하면 해당 구간의 서울 기온 변화를 분석할 수 있습니다.
-        예를 들어, 최근 5년 동안 **새벽 0~6시**, **오후 12~18시**, **특정 월/계절**의 기온 패턴을 따로 볼 수 있습니다.
         """
     )
 
-    weather_analysis = pipeline["weather"].copy()
-    weather_analysis["일시"] = pd.to_datetime(weather_analysis["일시"])
+    weather_analysis = processed_df.copy()
     weather_analysis["Date"] = weather_analysis["일시"].dt.date
     weather_analysis["Hour"] = weather_analysis["일시"].dt.hour
     weather_analysis["Month"] = weather_analysis["일시"].dt.month
@@ -1095,23 +756,15 @@ with tab_analysis:
             value=(min_date, max_date),
             min_value=min_date,
             max_value=max_date,
-            help="분석할 날짜 범위를 선택하세요."
         )
 
     with c2:
-        selected_hours = st.slider(
-            "Hour range",
-            min_value=0,
-            max_value=23,
-            value=(0, 23),
-            help="분석할 시간대를 선택하세요. 예: 0~6시는 새벽 시간대입니다."
-        )
+        selected_hours = st.slider("Hour range", 0, 23, (0, 23))
 
     with c3:
         aggregation = st.selectbox(
             "Aggregation",
             ["Hourly records", "Daily average", "Monthly average", "Yearly average"],
-            help="그래프에 표시할 집계 단위를 선택하세요."
         )
 
     if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
@@ -1130,7 +783,7 @@ with tab_analysis:
     ].copy()
 
     if filtered.empty:
-        st.warning("선택한 조건에 해당하는 데이터가 없습니다. 날짜 범위나 시간대를 다시 선택하세요.")
+        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
     else:
         temp_col = "기온(°C)"
 
@@ -1138,7 +791,6 @@ with tab_analysis:
         min_temp = filtered[temp_col].min()
         max_temp = filtered[temp_col].max()
         std_temp = filtered[temp_col].std()
-        record_count = len(filtered)
 
         min_row = filtered.loc[filtered[temp_col].idxmin()]
         max_row = filtered.loc[filtered[temp_col].idxmax()]
@@ -1148,82 +800,41 @@ with tab_analysis:
         m2.metric("Min Temp", f"{min_temp:.2f} °C")
         m3.metric("Max Temp", f"{max_temp:.2f} °C")
         m4.metric("Std Dev", f"{std_temp:.2f} °C")
-        m5.metric("Records", f"{record_count:,}")
+        m5.metric("Records", f"{len(filtered):,}")
 
         st.caption(
             f"Lowest: {min_row['일시']} / {min_row[temp_col]:.2f} °C  |  "
             f"Highest: {max_row['일시']} / {max_row[temp_col]:.2f} °C"
         )
 
-        # Time-series aggregation
         if aggregation == "Hourly records":
             plot_df = filtered[["일시", temp_col]].copy()
             plot_df = plot_df.rename(columns={"일시": "Time", temp_col: "Temperature"})
-            fig = px.line(
-                plot_df,
-                x="Time",
-                y="Temperature",
-                title=f"Temperature Trend: {start_date} to {end_date}, {start_hour}:00–{end_hour}:00",
-                labels={"Temperature": "Temperature (°C)", "Time": "Time"}
-            )
-
+            fig = px.line(plot_df, x="Time", y="Temperature", title="Temperature Trend")
         elif aggregation == "Daily average":
             plot_df = filtered.groupby("Date", as_index=False)[temp_col].mean()
             plot_df = plot_df.rename(columns={"Date": "Time", temp_col: "Temperature"})
-            fig = px.line(
-                plot_df,
-                x="Time",
-                y="Temperature",
-                title=f"Daily Average Temperature: {start_hour}:00–{end_hour}:00",
-                labels={"Temperature": "Temperature (°C)", "Time": "Date"}
-            )
-
+            fig = px.line(plot_df, x="Time", y="Temperature", title="Daily Average Temperature")
         elif aggregation == "Monthly average":
             filtered["YearMonth"] = filtered["일시"].dt.to_period("M").astype(str)
             plot_df = filtered.groupby("YearMonth", as_index=False)[temp_col].mean()
             plot_df = plot_df.rename(columns={"YearMonth": "Time", temp_col: "Temperature"})
-            fig = px.line(
-                plot_df,
-                x="Time",
-                y="Temperature",
-                title=f"Monthly Average Temperature: {start_hour}:00–{end_hour}:00",
-                labels={"Temperature": "Temperature (°C)", "Time": "Month"}
-            )
-
+            fig = px.line(plot_df, x="Time", y="Temperature", title="Monthly Average Temperature")
         else:
             plot_df = filtered.groupby("Year", as_index=False)[temp_col].mean()
             plot_df = plot_df.rename(columns={"Year": "Time", temp_col: "Temperature"})
-            fig = px.bar(
-                plot_df,
-                x="Time",
-                y="Temperature",
-                title=f"Yearly Average Temperature: {start_hour}:00–{end_hour}:00",
-                labels={"Temperature": "Temperature (°C)", "Time": "Year"}
-            )
+            fig = px.bar(plot_df, x="Time", y="Temperature", title="Yearly Average Temperature")
 
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("Average Temperature by Hour")
         hourly_avg = filtered.groupby("Hour", as_index=False)[temp_col].mean()
         hourly_avg = hourly_avg.rename(columns={temp_col: "Average_Temperature"})
-
-        fig_hour = px.bar(
-            hourly_avg,
-            x="Hour",
-            y="Average_Temperature",
-            title="Average Temperature by Selected Hour Range",
-            labels={"Average_Temperature": "Average Temperature (°C)", "Hour": "Hour of Day"}
-        )
+        fig_hour = px.bar(hourly_avg, x="Hour", y="Average_Temperature", title="Average Temperature by Hour")
         st.plotly_chart(fig_hour, use_container_width=True)
 
         st.subheader("Temperature Distribution")
-        fig_hist = px.histogram(
-            filtered,
-            x=temp_col,
-            nbins=40,
-            title="Temperature Distribution in Selected Range",
-            labels={temp_col: "Temperature (°C)"}
-        )
+        fig_hist = px.histogram(filtered, x=temp_col, nbins=40, title="Temperature Distribution")
         st.plotly_chart(fig_hist, use_container_width=True)
 
         st.subheader("Filtered Data")
@@ -1235,18 +846,21 @@ with tab_analysis:
             label="Download filtered data as CSV",
             data=csv_data,
             file_name="custom_temperature_analysis.csv",
-            mime="text/csv"
+            mime="text/csv",
         )
 
 
 with tab_data:
-    st.subheader("GitHub Data Files")
+    st.subheader("Generated Result Files")
 
-    csv_files = sorted(glob.glob(os.path.join(DATA_DIR, "*.csv")))
-    st.write([os.path.basename(f) for f in csv_files])
+    if os.path.exists(RESULT_DIR):
+        files = sorted(os.listdir(RESULT_DIR))
+        st.write(files)
+    else:
+        st.warning("result 폴더가 없습니다.")
 
-    st.subheader("Training/Test Prediction Preview")
+    st.subheader("Prediction Result Preview")
     st.dataframe(prediction_df.head(100), use_container_width=True)
 
-    st.subheader("Summary")
-    st.dataframe(summary_df, use_container_width=True)
+    st.subheader("Processed Dataset Preview")
+    st.dataframe(processed_df.head(100), use_container_width=True)
