@@ -5,6 +5,7 @@ on:
     paths:
       - "data/**"
       - "train_pipeline.py"
+      - "requirements.txt"
       - ".github/workflows/train.yml"
   workflow_dispatch:
 
