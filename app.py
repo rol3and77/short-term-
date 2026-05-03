@@ -31,6 +31,30 @@ def load_css(file_path: str):
 
 load_css("style.css")
 
+def apply_english_chart_style(fig, title="", x_title="", y_title=""):
+    """
+    Apply consistent English chart typography.
+    The dashboard explanations remain Korean, but all chart-internal text
+    is kept in English to prevent font rendering issues.
+    """
+    fig.update_layout(
+        title=title,
+        xaxis_title=x_title,
+        yaxis_title=y_title,
+        legend_title_text="",
+        font=dict(
+            family="Inter, Arial, sans-serif",
+            size=13,
+            color="#171717"
+        ),
+        title_font=dict(size=20, family="Inter, Arial, sans-serif"),
+        hoverlabel=dict(
+            font=dict(family="Inter, Arial, sans-serif")
+        )
+    )
+    return fig
+
+
 
 # ============================================================
 # Paths
@@ -464,6 +488,7 @@ with tab_overview:
         - 최종 기온 = 현재 기온 + 예측 변화량
         - Baseline과 머신러닝 모델 성능 비교
         - API 최신 제공 자료 기반 예측 지원
+        - 그래프 내부 텍스트는 글꼴 깨짐을 방지하기 위해 영어로 통일하고, 해석과 안내문은 한국어로 제공
         """
     )
 
@@ -502,6 +527,12 @@ with tab_results:
         barmode="group",
         title="Model Performance Comparison",
     )
+    fig_perf = apply_english_chart_style(
+        fig_perf,
+        title="Model Performance Comparison",
+        x_title="Model",
+        y_title="Score"
+    )
     st.plotly_chart(fig_perf, use_container_width=True)
 
     st.subheader("Test Data: Actual vs Predicted")
@@ -509,7 +540,12 @@ with tab_results:
     fig_line = go.Figure()
     fig_line.add_trace(go.Scatter(x=prediction_df["Time"], y=prediction_df["Actual_Temperature"], mode="lines", name="Actual Temperature"))
     fig_line.add_trace(go.Scatter(x=prediction_df["Time"], y=prediction_df["Predicted_Temperature"], mode="lines", name="Predicted Temperature"))
-    fig_line.update_layout(title="Actual vs Predicted Temperature", xaxis_title="Time", yaxis_title="Temperature (°C)")
+    fig_line = apply_english_chart_style(
+        fig_line,
+        title="Actual vs Predicted Temperature Over Time",
+        x_title="Time",
+        y_title="Temperature (°C)"
+    )
     st.plotly_chart(fig_line, use_container_width=True)
 
     fig_scatter = px.scatter(
@@ -522,6 +558,12 @@ with tab_results:
             "Predicted_Temperature": "Predicted Temperature (°C)",
         },
     )
+    fig_scatter = apply_english_chart_style(
+        fig_scatter,
+        title="Actual vs Predicted Scatter Plot",
+        x_title="Actual Temperature (°C)",
+        y_title="Predicted Temperature (°C)"
+    )
     st.plotly_chart(fig_scatter, use_container_width=True)
 
     st.subheader("Predicted Temperature Change")
@@ -533,6 +575,12 @@ with tab_results:
         labels={"Predicted_Change": "Predicted Change (°C)", "Time": "Time"},
     )
     fig_change.add_hline(y=0, line_dash="dash")
+    fig_change = apply_english_chart_style(
+        fig_change,
+        title="Predicted 1-Hour Temperature Change",
+        x_title="Time",
+        y_title="Predicted Change (°C)"
+    )
     st.plotly_chart(fig_change, use_container_width=True)
 
     st.subheader("Prediction Error Over Time")
@@ -544,12 +592,24 @@ with tab_results:
         labels={"Error": "Error (Actual - Predicted)", "Time": "Time"},
     )
     fig_error.add_hline(y=0, line_dash="dash")
+    fig_error = apply_english_chart_style(
+        fig_error,
+        title="Error Over Time",
+        x_title="Time",
+        y_title="Error (Actual - Predicted)"
+    )
     st.plotly_chart(fig_error, use_container_width=True)
 
     st.subheader("Feature Importance")
     top_features = feature_importance_df.sort_values("Importance", ascending=False).head(15)
     fig_feature = px.bar(top_features, x="Importance", y="Feature_English", orientation="h", title="Top 15 Feature Importance")
     fig_feature.update_layout(yaxis={"categoryorder": "total ascending"})
+    fig_feature = apply_english_chart_style(
+        fig_feature,
+        title="Top 15 Feature Importance",
+        x_title="Importance",
+        y_title="Feature"
+    )
     st.plotly_chart(fig_feature, use_container_width=True)
 
     no_current_temp = feature_importance_df[
@@ -559,6 +619,12 @@ with tab_results:
     st.subheader("Feature Importance Except Current Temperature")
     fig_no_temp = px.bar(no_current_temp, x="Importance", y="Feature_English", orientation="h", title="Feature Importance Except Current Temperature")
     fig_no_temp.update_layout(yaxis={"categoryorder": "total ascending"})
+    fig_no_temp = apply_english_chart_style(
+        fig_no_temp,
+        title="Feature Importance Except Current Temperature",
+        x_title="Importance",
+        y_title="Feature"
+    )
     st.plotly_chart(fig_no_temp, use_container_width=True)
 
 
@@ -591,6 +657,12 @@ with tab_diagnostics:
                 title="Time-Series Cross-Validation RMSE",
                 labels={"CV_RMSE_Mean": "CV RMSE Mean (°C)"}
             )
+            fig_cv = apply_english_chart_style(
+                fig_cv,
+                title="Time-Series Cross-Validation RMSE",
+                x_title="Model",
+                y_title="CV RMSE Mean (°C)"
+            )
             st.plotly_chart(fig_cv, use_container_width=True)
 
     if residual_summary_df is not None:
@@ -616,10 +688,11 @@ with tab_diagnostics:
                 name="RMSE"
             )
         )
-        fig_hour_error.update_layout(
+        fig_hour_error = apply_english_chart_style(
+            fig_hour_error,
             title="Prediction Error by Hour",
-            xaxis_title="Hour",
-            yaxis_title="Error (°C)"
+            x_title="Hour",
+            y_title="Error (°C)"
         )
         st.plotly_chart(fig_hour_error, use_container_width=True)
 
@@ -699,7 +772,12 @@ with tab_api:
                 fig_api = go.Figure()
                 fig_api.add_trace(go.Scatter(x=compare_result["Prediction_Time"], y=compare_result["Actual_Temperature"], mode="lines+markers", name="Actual"))
                 fig_api.add_trace(go.Scatter(x=compare_result["Prediction_Time"], y=compare_result["Predicted_Temperature"], mode="lines+markers", name="Predicted"))
-                fig_api.update_layout(title="API Interval: Actual vs Predicted", xaxis_title="Time", yaxis_title="Temperature (°C)")
+                fig_api = apply_english_chart_style(
+                    fig_api,
+                    title="API Interval: Actual vs Predicted",
+                    x_title="Time",
+                    y_title="Temperature (°C)"
+                )
                 st.plotly_chart(fig_api, use_container_width=True)
 
                 fig_api_change = px.line(
@@ -710,6 +788,12 @@ with tab_api:
                     labels={"Predicted_Change": "Predicted Change (°C)"},
                 )
                 fig_api_change.add_hline(y=0, line_dash="dash")
+                fig_api_change = apply_english_chart_style(
+                    fig_api_change,
+                    title="API Interval: Predicted Temperature Change",
+                    x_title="Prediction Time",
+                    y_title="Predicted Change (°C)"
+                )
                 st.plotly_chart(fig_api_change, use_container_width=True)
 
                 st.subheader("API Comparison Table")
@@ -974,10 +1058,11 @@ with tab_future:
                         name="Future Predicted Temperature"
                     )
                 )
-                fig_future.update_layout(
+                fig_future = apply_english_chart_style(
+                    fig_future,
                     title="Future Temperature Forecast After Latest Uploaded Data",
-                    xaxis_title="Forecast Time",
-                    yaxis_title="Temperature (°C)"
+                    x_title="Forecast Time",
+                    y_title="Temperature (°C)"
                 )
                 st.plotly_chart(fig_future, use_container_width=True)
 
@@ -989,6 +1074,12 @@ with tab_future:
                     labels={"Predicted_Change": "Predicted Change (°C)", "Forecast_Time": "Forecast Time"}
                 )
                 fig_change_future.add_hline(y=0, line_dash="dash")
+                fig_change_future = apply_english_chart_style(
+                    fig_change_future,
+                    title="Predicted Hourly Temperature Change",
+                    x_title="Forecast Time",
+                    y_title="Predicted Change (°C)"
+                )
                 st.plotly_chart(fig_change_future, use_container_width=True)
 
                 st.subheader("Future Forecast Table")
@@ -1084,6 +1175,12 @@ with tab_future:
                 y=estimate["Estimated_Temperature"],
                 line_dash="dash",
                 annotation_text="Estimated temperature"
+            )
+            fig_pattern = apply_english_chart_style(
+                fig_pattern,
+                title="Historical Similar-Date Temperature Samples",
+                x_title="Historical Time",
+                y_title="Temperature (°C)"
             )
             st.plotly_chart(fig_pattern, use_container_width=True)
 
@@ -1204,16 +1301,34 @@ with tab_analysis:
             plot_df = plot_df.rename(columns={"Year": "Time", temp_col: "Temperature"})
             fig = px.bar(plot_df, x="Time", y="Temperature", title="Yearly Average Temperature")
 
+        fig = apply_english_chart_style(
+            fig,
+            title=fig.layout.title.text or "Temperature Trend",
+            x_title="Time",
+            y_title="Temperature (°C)"
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("Average Temperature by Hour")
         hourly_avg = filtered.groupby("Hour", as_index=False)[temp_col].mean()
         hourly_avg = hourly_avg.rename(columns={temp_col: "Average_Temperature"})
         fig_hour = px.bar(hourly_avg, x="Hour", y="Average_Temperature", title="Average Temperature by Hour")
+        fig_hour = apply_english_chart_style(
+            fig_hour,
+            title="Average Temperature by Hour",
+            x_title="Hour",
+            y_title="Average Temperature (°C)"
+        )
         st.plotly_chart(fig_hour, use_container_width=True)
 
         st.subheader("Temperature Distribution")
         fig_hist = px.histogram(filtered, x=temp_col, nbins=40, title="Temperature Distribution")
+        fig_hist = apply_english_chart_style(
+            fig_hist,
+            title="Temperature Distribution",
+            x_title="Temperature (°C)",
+            y_title="Count"
+        )
         st.plotly_chart(fig_hist, use_container_width=True)
 
         st.subheader("Filtered Data")
