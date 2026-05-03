@@ -1,0 +1,6 @@
+﻿Metric,Value,Interpretation
+Mean Error Bias,0.002451488495619358,Positive means actual temperature tends to be higher than prediction.
+Error Standard Deviation,0.4424672870431077,Spread of residual errors.
+P90 Absolute Error,0.6768710963533782,90% of absolute errors are below this value.
+P95 Absolute Error,0.9092205012684866,95% of absolute errors are below this value.
+Empirical 90% Interval Coverage,0.8999542124542125,Share of test observations inside empirical 90% interval.

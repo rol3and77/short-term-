@@ -1,0 +1,9 @@
+﻿Metric,Value
+Source file count,5
+Raw rows,43728
+Rows after datetime cleaning,43728
+Rows after deduplication,43728
+Duplicate timestamp rows removed,0
+Missing-hour rows created,96
+Observed start,2020-12-31 01:00:00
+Observed end,2025-12-31 00:00:00
