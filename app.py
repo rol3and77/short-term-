@@ -247,6 +247,11 @@ def load_and_preprocess_data(data_dir: str) -> pd.DataFrame:
     weather["일시"] = pd.to_datetime(weather["일시"], errors="coerce")
     weather = weather.dropna(subset=["일시"]).copy()
 
+    if weather.empty:
+        raise ValueError(
+            "No valid datetime rows were found. Please check that the CSV files in data/ contain the column '일시'."
+        )
+
     for col in NUMERIC_COLUMNS:
         weather[col] = pd.to_numeric(weather[col], errors="coerce")
 
@@ -259,7 +264,7 @@ def load_and_preprocess_data(data_dir: str) -> pd.DataFrame:
     full_time_index = pd.date_range(
         start=weather.index.min(),
         end=weather.index.max(),
-        freq="H"
+        freq="h"
     )
 
     weather = weather.reindex(full_time_index)
