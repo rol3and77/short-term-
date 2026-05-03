@@ -24,7 +24,11 @@ st.set_page_config(
     page_icon="🌤️",
     layout="wide",
 )
+def load_css(file_path: str):
+    with open(file_path, encoding="utf-8") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
+load_css("style.css")
 
 # ============================================================
 # Path Settings
