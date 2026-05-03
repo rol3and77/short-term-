@@ -329,12 +329,60 @@ def compare_api_interval(api_weather: pd.DataFrame, model_bundle: dict):
 # UI
 # ============================================================
 
-st.title("🌤️ Seoul Weather ML Dashboard")
 st.markdown(
     """
-    기상청 서울 ASOS 108번 지점의 5년치 시간별 관측자료를 기반으로  
-    **1시간 뒤 서울 기온 변화량을 예측한 뒤 현재 기온에 더해 최종 기온을 산출**하는 머신러닝 대시보드입니다.
-    """
+    <section class="weather-hero">
+      <div class="hero-copy">
+        <div class="hero-kicker">✶ Seoul ASOS · ML Forecast System</div>
+        <h1>Seoul temperature forecasting, built like an editorial dashboard.</h1>
+        <p>
+          5년치 서울 ASOS 시간별 관측자료를 기반으로 1시간 뒤 기온 변화량을 예측하고,
+          GitHub Actions와 Streamlit을 통해 학습·검증·시각화를 자동화한 포트폴리오 프로젝트입니다.
+        </p>
+        <div class="hero-actions">
+          <span class="hero-pill primary">Future Forecast</span>
+          <span class="hero-pill">API Prediction</span>
+          <span class="hero-pill">Custom Analysis</span>
+        </div>
+      </div>
+      <div class="hero-mockup">
+        <div class="mockup-top">
+          <div class="mockup-dots">
+            <span class="mockup-dot"></span>
+            <span class="mockup-dot"></span>
+            <span class="mockup-dot"></span>
+          </div>
+          <span>weather_pipeline.py</span>
+        </div>
+        <div class="mockup-grid">
+          <div class="mockup-panel">
+            <div class="mockup-label">Prediction target</div>
+            <div class="mockup-value">+1h</div>
+          </div>
+          <div class="mockup-panel">
+            <div class="mockup-label">Station</div>
+            <div class="mockup-value">108</div>
+          </div>
+        </div>
+        <div class="mockup-panel">
+          <div class="mockup-label">Pipeline</div>
+          <div class="mockup-code">
+            <span class="coral">data/*.csv</span> → preprocess<br/>
+            features → train model<br/>
+            <span class="teal">current temp + predicted change</span><br/>
+            deploy → Streamlit dashboard
+          </div>
+        </div>
+        <div class="mockup-panel">
+          <div class="mockup-label">Design note</div>
+          <div class="mockup-code">
+            cream canvas · coral actions · dark product surface
+          </div>
+        </div>
+      </div>
+    </section>
+    """,
+    unsafe_allow_html=True,
 )
 
 missing_files = ensure_required_files()
@@ -864,3 +912,13 @@ with tab_data:
 
     st.subheader("Processed Dataset Preview")
     st.dataframe(processed_df.head(100), use_container_width=True)
+
+st.markdown(
+    """
+    <div class="dashboard-footer">
+      <strong>Seoul Weather ML Dashboard</strong><br/>
+      GitHub Actions로 학습 결과를 자동 생성하고, Streamlit에서는 사전 생성된 모델과 결과 파일을 불러오는 빠른 대시보드 구조입니다.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
