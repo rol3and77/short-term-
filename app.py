@@ -44,6 +44,16 @@ PREDICTION_PATH = os.path.join(RESULT_DIR, "temperature_prediction_result.csv")
 SUMMARY_PATH = os.path.join(RESULT_DIR, "project_summary.csv")
 FEATURE_PATH = os.path.join(RESULT_DIR, "feature_importance.csv")
 PROCESSED_PATH = os.path.join(RESULT_DIR, "seoul_weather_processed_dataset.csv")
+CV_SUMMARY_PATH = os.path.join(RESULT_DIR, "time_series_cv_summary.csv")
+CV_RESULTS_PATH = os.path.join(RESULT_DIR, "time_series_cv_results.csv")
+DATA_QUALITY_PATH = os.path.join(RESULT_DIR, "data_quality_report.csv")
+MISSING_REPORT_PATH = os.path.join(RESULT_DIR, "missing_value_report.csv")
+RESIDUAL_SUMMARY_PATH = os.path.join(RESULT_DIR, "residual_analysis_summary.csv")
+ERROR_BY_HOUR_PATH = os.path.join(RESULT_DIR, "error_by_hour.csv")
+ERROR_BY_MONTH_PATH = os.path.join(RESULT_DIR, "error_by_month.csv")
+ERROR_BY_SEASON_PATH = os.path.join(RESULT_DIR, "error_by_season.csv")
+ERROR_BY_TEMP_BIN_PATH = os.path.join(RESULT_DIR, "error_by_temperature_bin.csv")
+MODEL_CARD_PATH = os.path.join(RESULT_DIR, "model_card.md")
 
 API_URL = "https://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList"
 SEOUL_STATION_ID = "108"
@@ -92,6 +102,20 @@ def load_csv(path: str) -> pd.DataFrame:
 @st.cache_resource
 def load_model_bundle():
     return joblib.load(MODEL_PATH)
+
+
+@st.cache_data
+def load_optional_csv(path: str):
+    if os.path.exists(path):
+        return pd.read_csv(path, encoding="utf-8-sig")
+    return None
+
+
+def load_optional_text(path: str):
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    return None
 
 
 def make_season(month: int) -> int:
@@ -400,6 +424,17 @@ summary_df = load_csv(SUMMARY_PATH)
 feature_importance_df = load_csv(FEATURE_PATH)
 processed_df = load_csv(PROCESSED_PATH)
 
+cv_summary_df = load_optional_csv(CV_SUMMARY_PATH)
+cv_results_df = load_optional_csv(CV_RESULTS_PATH)
+data_quality_df = load_optional_csv(DATA_QUALITY_PATH)
+missing_report_df = load_optional_csv(MISSING_REPORT_PATH)
+residual_summary_df = load_optional_csv(RESIDUAL_SUMMARY_PATH)
+error_by_hour_df = load_optional_csv(ERROR_BY_HOUR_PATH)
+error_by_month_df = load_optional_csv(ERROR_BY_MONTH_PATH)
+error_by_season_df = load_optional_csv(ERROR_BY_SEASON_PATH)
+error_by_temp_bin_df = load_optional_csv(ERROR_BY_TEMP_BIN_PATH)
+model_card_text = load_optional_text(MODEL_CARD_PATH)
+
 prediction_df["Time"] = pd.to_datetime(prediction_df["Time"])
 processed_df["일시"] = pd.to_datetime(processed_df["일시"])
 summary = summary_df.iloc[0]
@@ -412,8 +447,8 @@ col4.metric("RMSE", f"{summary['rmse']:.3f} °C")
 
 st.divider()
 
-tab_overview, tab_results, tab_api, tab_future, tab_analysis, tab_data = st.tabs(
-    ["Overview", "Model Results", "API Prediction", "Future Forecast", "Custom Analysis", "Data Preview"]
+tab_overview, tab_results, tab_diagnostics, tab_api, tab_future, tab_analysis, tab_data = st.tabs(
+    ["Overview", "Model Results", "Research Diagnostics", "API Prediction", "Future Forecast", "Custom Analysis", "Data Preview"]
 )
 
 
@@ -525,6 +560,96 @@ with tab_results:
     fig_no_temp = px.bar(no_current_temp, x="Importance", y="Feature_English", orientation="h", title="Feature Importance Except Current Temperature")
     fig_no_temp.update_layout(yaxis={"categoryorder": "total ascending"})
     st.plotly_chart(fig_no_temp, use_container_width=True)
+
+
+
+with tab_diagnostics:
+    st.subheader("Research Diagnostics")
+    st.markdown(
+        """
+        이 탭은 단순 예측 결과를 넘어서, 데이터 품질·시간 순서 교차검증·잔차 분석·시간대별 오차를 확인하기 위한 연구용 진단 화면입니다.
+        """
+    )
+
+    if data_quality_df is not None:
+        st.markdown("### Data Quality Report")
+        st.dataframe(data_quality_df, use_container_width=True)
+
+    if missing_report_df is not None:
+        st.markdown("### Missing Value Report")
+        st.dataframe(missing_report_df, use_container_width=True)
+
+    if cv_summary_df is not None:
+        st.markdown("### Time-Series Cross-Validation Summary")
+        st.dataframe(cv_summary_df, use_container_width=True)
+
+        if {"Model", "CV_RMSE_Mean"}.issubset(cv_summary_df.columns):
+            fig_cv = px.bar(
+                cv_summary_df,
+                x="Model",
+                y="CV_RMSE_Mean",
+                title="Time-Series Cross-Validation RMSE",
+                labels={"CV_RMSE_Mean": "CV RMSE Mean (°C)"}
+            )
+            st.plotly_chart(fig_cv, use_container_width=True)
+
+    if residual_summary_df is not None:
+        st.markdown("### Residual Analysis Summary")
+        st.dataframe(residual_summary_df, use_container_width=True)
+
+    if error_by_hour_df is not None:
+        st.markdown("### Error by Hour")
+        fig_hour_error = go.Figure()
+        fig_hour_error.add_trace(
+            go.Scatter(
+                x=error_by_hour_df["Hour"],
+                y=error_by_hour_df["MAE"],
+                mode="lines+markers",
+                name="MAE"
+            )
+        )
+        fig_hour_error.add_trace(
+            go.Scatter(
+                x=error_by_hour_df["Hour"],
+                y=error_by_hour_df["RMSE"],
+                mode="lines+markers",
+                name="RMSE"
+            )
+        )
+        fig_hour_error.update_layout(
+            title="Prediction Error by Hour",
+            xaxis_title="Hour",
+            yaxis_title="Error (°C)"
+        )
+        st.plotly_chart(fig_hour_error, use_container_width=True)
+
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        if error_by_month_df is not None:
+            st.markdown("### Error by Month")
+            st.dataframe(error_by_month_df, use_container_width=True)
+
+    with col_b:
+        if error_by_season_df is not None:
+            st.markdown("### Error by Season")
+            st.dataframe(error_by_season_df, use_container_width=True)
+
+    if error_by_temp_bin_df is not None:
+        st.markdown("### Error by Temperature Range")
+        st.dataframe(error_by_temp_bin_df, use_container_width=True)
+
+    if model_card_text is not None:
+        st.markdown("### Model Card")
+        st.markdown(model_card_text)
+
+    if cv_summary_df is None:
+        st.info(
+            "Research diagnostic files are not available yet. "
+            "Run the updated GitHub Actions training pipeline to generate them."
+        )
+
+
 
 
 with tab_api:
