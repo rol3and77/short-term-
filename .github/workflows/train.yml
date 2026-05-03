@@ -37,6 +37,9 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
+
           git add result/
           git commit -m "Update trained weather model results" || echo "No changes to commit"
-          git push
+
+          git pull --rebase origin main
+          git push origin main
