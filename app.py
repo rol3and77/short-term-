@@ -333,16 +333,16 @@ st.markdown(
     """
     <section class="weather-hero">
       <div class="hero-copy">
-        <div class="hero-kicker">✶ Seoul ASOS · ML Forecast System</div>
-        <h1>Seoul temperature forecasting, built like an editorial dashboard.</h1>
+        <div class="hero-kicker">Seoul ASOS · GitHub Actions · Streamlit</div>
+        <h1>Forecast Seoul temperature with a developer-grade dashboard.</h1>
         <p>
           5년치 서울 ASOS 시간별 관측자료를 기반으로 1시간 뒤 기온 변화량을 예측하고,
-          GitHub Actions와 Streamlit을 통해 학습·검증·시각화를 자동화한 포트폴리오 프로젝트입니다.
+          Future Forecast, API Prediction, Custom Analysis를 한 화면에서 확인하는 머신러닝 대시보드입니다.
         </p>
         <div class="hero-actions">
-          <span class="hero-pill primary">Future Forecast</span>
-          <span class="hero-pill">API Prediction</span>
-          <span class="hero-pill">Custom Analysis</span>
+          <span class="hero-pill primary">Get forecast</span>
+          <span class="hero-pill">View model results</span>
+          <span class="hero-pill">Analyze custom hours</span>
         </div>
       </div>
       <div class="hero-mockup">
@@ -352,7 +352,7 @@ st.markdown(
             <span class="mockup-dot"></span>
             <span class="mockup-dot"></span>
           </div>
-          <span>weather_pipeline.py</span>
+          <span>weather-dashboard.app</span>
         </div>
         <div class="mockup-grid">
           <div class="mockup-panel">
@@ -361,22 +361,23 @@ st.markdown(
           </div>
           <div class="mockup-panel">
             <div class="mockup-label">Station</div>
-            <div class="mockup-value">108</div>
+            <div class="mockup-value">Seoul 108</div>
           </div>
-        </div>
-        <div class="mockup-panel">
-          <div class="mockup-label">Pipeline</div>
-          <div class="mockup-code">
-            <span class="coral">data/*.csv</span> → preprocess<br/>
-            features → train model<br/>
-            <span class="teal">current temp + predicted change</span><br/>
-            deploy → Streamlit dashboard
+          <div class="mockup-panel">
+            <div class="mockup-label">Automation</div>
+            <div class="mockup-code">
+              <span class="coral">data/*.csv</span> → GitHub Actions<br/>
+              train_pipeline.py → result/*.joblib<br/>
+              Streamlit → fast dashboard
+            </div>
           </div>
-        </div>
-        <div class="mockup-panel">
-          <div class="mockup-label">Design note</div>
-          <div class="mockup-code">
-            cream canvas · coral actions · dark product surface
+          <div class="mockup-panel">
+            <div class="mockup-label">Forecast logic</div>
+            <div class="mockup-code">
+              current temperature<br/>
+              + <span class="teal">predicted temperature change</span><br/>
+              = future temperature
+            </div>
           </div>
         </div>
       </div>
@@ -594,20 +595,20 @@ with tab_api:
 
 
 
+
 with tab_future:
     st.subheader("Future Forecast After Latest Uploaded Data")
     st.markdown(
         """
-        이 탭은 업로드된 데이터의 마지막 시점 이후를 예측합니다.  
-        모델은 **1시간 뒤 기온 변화량**을 예측하고, 예측값을 다음 시점의 입력으로 다시 사용하여
-        여러 시간 뒤까지 반복 예측합니다.
+        이 탭은 **업로드된 데이터의 마지막 시점 이후**를 예측합니다.
 
-        단, 미래의 습도·풍속·기압·강수량은 실제로 알 수 없으므로 아래에서 선택한 가정 방식으로 유지합니다.
-        따라서 예측 시간이 길어질수록 불확실성이 커질 수 있습니다.
+        - 가까운 미래는 모델을 반복 적용하여 시간별 기온을 시뮬레이션합니다.
+        - 먼 미래는 특정 날짜·시간과 비슷한 과거 패턴을 이용해 계절적 예상 기온을 계산합니다.
+        - 실제 장기예보가 아니라, 보유한 서울 ASOS 데이터 기반의 통계적 추정입니다.
         """
     )
 
-    def iterative_future_forecast(history_df: pd.DataFrame, model_bundle: dict, horizon_hours: int, exogenous_mode: str):
+    def iterative_future_forecast(history_df: pd.DataFrame, model_bundle: dict, target_time: pd.Timestamp, exogenous_mode: str):
         model = model_bundle["model"]
         feature_columns = model_bundle["feature_columns"]
         predict_hour = model_bundle.get("predict_hour", 1)
@@ -618,6 +619,13 @@ with tab_future:
 
         if len(future_history) < 60:
             raise ValueError("미래 예측을 위해 최소 60시간 이상의 데이터가 필요합니다.")
+
+        latest_time = future_history["일시"].iloc[-1]
+
+        if target_time <= latest_time:
+            raise ValueError("예측 대상 시각은 업로드된 데이터의 마지막 시각보다 이후여야 합니다.")
+
+        horizon_hours = int(np.ceil((target_time - latest_time) / pd.Timedelta(hours=1)))
 
         forecast_rows = []
 
@@ -680,103 +688,301 @@ with tab_future:
 
         return pd.DataFrame(forecast_rows)
 
+
+    def calendar_temperature_estimate(processed_history: pd.DataFrame, target_time: pd.Timestamp, day_window: int = 14):
+        """
+        먼 미래 날짜에 대해 같은 월/일/시간대 주변의 과거 관측값을 이용해
+        계절적 예상 기온을 계산한다.
+        """
+        hist = processed_history.copy()
+        hist["일시"] = pd.to_datetime(hist["일시"])
+        hist["Month"] = hist["일시"].dt.month
+        hist["Day"] = hist["일시"].dt.day
+        hist["Hour"] = hist["일시"].dt.hour
+        hist["DayOfYear"] = hist["일시"].dt.dayofyear
+
+        target_doy = target_time.dayofyear
+        target_hour = target_time.hour
+
+        # Circular day-of-year distance, handles year boundary.
+        hist["Day_Distance"] = np.minimum(
+            np.abs(hist["DayOfYear"] - target_doy),
+            366 - np.abs(hist["DayOfYear"] - target_doy)
+        )
+
+        sample = hist[
+            (hist["Hour"] == target_hour)
+            & (hist["Day_Distance"] <= day_window)
+        ].copy()
+
+        # If too few rows, widen to +/- 30 days.
+        if len(sample) < 20:
+            sample = hist[
+                (hist["Hour"] == target_hour)
+                & (hist["Day_Distance"] <= 30)
+            ].copy()
+
+        if sample.empty:
+            raise ValueError("선택한 날짜와 시간대에 대응하는 과거 패턴 데이터를 찾지 못했습니다.")
+
+        estimate = {
+            "Target_Time": target_time,
+            "Estimated_Temperature": float(sample["기온(°C)"].mean()),
+            "Median_Temperature": float(sample["기온(°C)"].median()),
+            "Min_Similar_Pattern": float(sample["기온(°C)"].min()),
+            "Max_Similar_Pattern": float(sample["기온(°C)"].max()),
+            "Std_Similar_Pattern": float(sample["기온(°C)"].std()),
+            "Sample_Count": int(len(sample)),
+            "Day_Window": int(day_window if len(sample) >= 20 else 30),
+        }
+
+        return estimate, sample
+
+
     history_for_future = processed_df[REQUIRED_COLUMNS].copy()
     history_for_future["일시"] = pd.to_datetime(history_for_future["일시"])
     history_for_future = history_for_future.sort_values("일시").reset_index(drop=True)
 
     latest_obs = history_for_future.iloc[-1]
+    latest_time = pd.to_datetime(latest_obs["일시"])
 
-    f1, f2, f3 = st.columns([1, 1, 1.2])
+    st.info(
+        f"업로드된 데이터의 마지막 시각은 **{latest_time}** 입니다. "
+        "이 시각 이후의 날짜와 시간을 선택해 예측할 수 있습니다."
+    )
 
-    with f1:
-        horizon_hours = st.slider(
-            "Forecast horizon",
-            min_value=1,
-            max_value=48,
-            value=12,
-            help="업로드된 데이터 이후 몇 시간까지 예측할지 선택하세요."
+    mode = st.radio(
+        "Forecast mode",
+        [
+            "Short-term ML simulation",
+            "Any-date seasonal estimate"
+        ],
+        horizontal=True,
+        help=(
+            "Short-term ML simulation은 마지막 데이터 이후를 시간별로 반복 예측합니다. "
+            "Any-date seasonal estimate는 2025년 이후 어떤 날짜라도 과거 유사 날짜 패턴으로 추정합니다."
+        )
+    )
+
+    if mode == "Short-term ML simulation":
+        st.markdown("#### Short-term ML simulation")
+        st.caption(
+            "마지막 관측값 이후부터 선택한 목표 시각까지 시간별로 반복 예측합니다. "
+            "너무 먼 미래까지 반복하면 오차가 누적되므로 1~30일 정도의 단기 시뮬레이션에 적합합니다."
         )
 
-    with f2:
-        exogenous_mode = st.selectbox(
-            "Future weather assumption",
-            ["Hold last observed", "Recent 6-hour average"],
-            help="미래 습도·풍속·기압·강수량을 어떻게 가정할지 선택합니다."
-        )
+        c1, c2, c3 = st.columns([1.2, 0.8, 1.2])
 
-    with f3:
-        st.metric("Latest Data Time", str(latest_obs["일시"]))
-        st.metric("Latest Temperature", f"{latest_obs['기온(°C)']:.2f} °C")
-
-    try:
-        future_result = iterative_future_forecast(
-            history_df=history_for_future,
-            model_bundle=model_bundle,
-            horizon_hours=int(horizon_hours),
-            exogenous_mode=exogenous_mode
-        )
-
-        final_row = future_result.iloc[-1]
-
-        fm1, fm2, fm3, fm4 = st.columns(4)
-        fm1.metric("Final Forecast Time", str(final_row["Forecast_Time"]))
-        fm2.metric("Final Predicted Temp", f"{final_row['Predicted_Temperature']:.2f} °C")
-        fm3.metric("Total Temp Change", f"{final_row['Predicted_Temperature'] - latest_obs['기온(°C)']:.2f} °C")
-        fm4.metric("Forecast Steps", f"{len(future_result)} h")
-
-        fig_future = go.Figure()
-        fig_future.add_trace(
-            go.Scatter(
-                x=[latest_obs["일시"]],
-                y=[latest_obs["기온(°C)"]],
-                mode="markers",
-                name="Latest Observed Temperature",
-                marker=dict(size=10)
+        with c1:
+            target_date = st.date_input(
+                "Target date",
+                value=(latest_time + pd.Timedelta(hours=12)).date(),
+                min_value=(latest_time + pd.Timedelta(hours=1)).date(),
+                max_value=(latest_time + pd.Timedelta(days=30)).date(),
+                help="반복 ML 예측은 최대 30일 이후까지 선택할 수 있습니다."
             )
-        )
-        fig_future.add_trace(
-            go.Scatter(
-                x=future_result["Forecast_Time"],
-                y=future_result["Predicted_Temperature"],
-                mode="lines+markers",
-                name="Future Predicted Temperature"
+
+        with c2:
+            target_hour = st.number_input(
+                "Target hour",
+                min_value=0,
+                max_value=23,
+                value=int((latest_time + pd.Timedelta(hours=12)).hour),
+                step=1
             )
-        )
-        fig_future.update_layout(
-            title="Future Temperature Forecast After Latest Uploaded Data",
-            xaxis_title="Forecast Time",
-            yaxis_title="Temperature (°C)"
-        )
-        st.plotly_chart(fig_future, use_container_width=True)
 
-        fig_change_future = px.bar(
-            future_result,
-            x="Forecast_Time",
-            y="Predicted_Change",
-            title="Predicted Hourly Temperature Change",
-            labels={"Predicted_Change": "Predicted Change (°C)", "Forecast_Time": "Forecast Time"}
-        )
-        fig_change_future.add_hline(y=0, line_dash="dash")
-        st.plotly_chart(fig_change_future, use_container_width=True)
+        with c3:
+            exogenous_mode = st.selectbox(
+                "Future weather assumption",
+                ["Hold last observed", "Recent 6-hour average"],
+                help="미래 습도·풍속·기압·강수량을 어떻게 가정할지 선택합니다."
+            )
 
-        st.subheader("Future Forecast Table")
-        st.dataframe(future_result, use_container_width=True)
-
-        csv_future = future_result.to_csv(index=False, encoding="utf-8-sig")
-        st.download_button(
-            label="Download future forecast as CSV",
-            data=csv_future,
-            file_name="future_forecast_after_latest_data.csv",
-            mime="text/csv",
+        target_time = pd.Timestamp(
+            year=target_date.year,
+            month=target_date.month,
+            day=target_date.day,
+            hour=int(target_hour)
         )
 
-        st.info(
-            "이 예측은 데이터의 마지막 시점 이후를 반복 예측한 결과입니다. "
-            "미래의 습도·풍속·기압·강수량은 실제 관측값이 아니라 사용자가 선택한 방식으로 가정한 값입니다."
+        if target_time <= latest_time:
+            st.warning("예측 대상 시각은 마지막 데이터 시각보다 이후여야 합니다.")
+        else:
+            horizon_hours = int(np.ceil((target_time - latest_time) / pd.Timedelta(hours=1)))
+
+            h1, h2, h3 = st.columns(3)
+            h1.metric("Latest Data Time", str(latest_time))
+            h2.metric("Target Time", str(target_time))
+            h3.metric("Forecast Horizon", f"{horizon_hours} h")
+
+            try:
+                future_result = iterative_future_forecast(
+                    history_df=history_for_future,
+                    model_bundle=model_bundle,
+                    target_time=target_time,
+                    exogenous_mode=exogenous_mode
+                )
+
+                final_row = future_result.iloc[-1]
+
+                fm1, fm2, fm3, fm4 = st.columns(4)
+                fm1.metric("Final Forecast Time", str(final_row["Forecast_Time"]))
+                fm2.metric("Final Predicted Temp", f"{final_row['Predicted_Temperature']:.2f} °C")
+                fm3.metric("Total Temp Change", f"{final_row['Predicted_Temperature'] - latest_obs['기온(°C)']:.2f} °C")
+                fm4.metric("Forecast Steps", f"{len(future_result)} h")
+
+                fig_future = go.Figure()
+                fig_future.add_trace(
+                    go.Scatter(
+                        x=[latest_obs["일시"]],
+                        y=[latest_obs["기온(°C)"]],
+                        mode="markers",
+                        name="Latest Observed Temperature",
+                        marker=dict(size=10)
+                    )
+                )
+                fig_future.add_trace(
+                    go.Scatter(
+                        x=future_result["Forecast_Time"],
+                        y=future_result["Predicted_Temperature"],
+                        mode="lines+markers",
+                        name="Future Predicted Temperature"
+                    )
+                )
+                fig_future.update_layout(
+                    title="Future Temperature Forecast After Latest Uploaded Data",
+                    xaxis_title="Forecast Time",
+                    yaxis_title="Temperature (°C)"
+                )
+                st.plotly_chart(fig_future, use_container_width=True)
+
+                fig_change_future = px.bar(
+                    future_result,
+                    x="Forecast_Time",
+                    y="Predicted_Change",
+                    title="Predicted Hourly Temperature Change",
+                    labels={"Predicted_Change": "Predicted Change (°C)", "Forecast_Time": "Forecast Time"}
+                )
+                fig_change_future.add_hline(y=0, line_dash="dash")
+                st.plotly_chart(fig_change_future, use_container_width=True)
+
+                st.subheader("Future Forecast Table")
+                st.dataframe(future_result, use_container_width=True)
+
+                csv_future = future_result.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button(
+                    label="Download future forecast as CSV",
+                    data=csv_future,
+                    file_name="future_forecast_after_latest_data.csv",
+                    mime="text/csv",
+                )
+
+            except Exception as e:
+                st.error(f"Future forecast failed: {e}")
+
+    else:
+        st.markdown("#### Any-date seasonal estimate")
+        st.caption(
+            "2025년 이후 원하는 날짜와 시간을 입력하면, 과거 5년 데이터에서 같은 날짜 주변·같은 시간대의 패턴을 찾아 "
+            "계절적 예상 기온을 계산합니다. 장기 실제 날씨 예보가 아니라 과거 패턴 기반 기대값입니다."
         )
 
-    except Exception as e:
-        st.error(f"Future forecast failed: {e}")
+        c1, c2, c3 = st.columns([1.2, 0.8, 1])
+
+        with c1:
+            target_date = st.date_input(
+                "Target date after uploaded data",
+                value=max((latest_time + pd.DateOffset(years=1)).date(), latest_time.date()),
+                min_value=(latest_time + pd.Timedelta(days=1)).date(),
+                max_value=pd.Timestamp("2100-12-31").date(),
+                help="2025년 이후 어느 날짜든 선택할 수 있습니다."
+            )
+
+        with c2:
+            target_hour = st.number_input(
+                "Target hour",
+                min_value=0,
+                max_value=23,
+                value=12,
+                step=1
+            )
+
+        with c3:
+            day_window = st.slider(
+                "Similar-date window",
+                min_value=3,
+                max_value=30,
+                value=14,
+                help="선택한 날짜 전후 며칠까지 유사 날짜로 볼지 정합니다."
+            )
+
+        target_time = pd.Timestamp(
+            year=target_date.year,
+            month=target_date.month,
+            day=target_date.day,
+            hour=int(target_hour)
+        )
+
+        try:
+            estimate, similar_sample = calendar_temperature_estimate(
+                processed_history=processed_df,
+                target_time=target_time,
+                day_window=int(day_window)
+            )
+
+            e1, e2, e3, e4 = st.columns(4)
+            e1.metric("Target Time", str(estimate["Target_Time"]))
+            e2.metric("Estimated Temp", f"{estimate['Estimated_Temperature']:.2f} °C")
+            e3.metric("Typical Range", f"{estimate['Min_Similar_Pattern']:.1f} ~ {estimate['Max_Similar_Pattern']:.1f} °C")
+            e4.metric("Similar Samples", f"{estimate['Sample_Count']}")
+
+            st.markdown(
+                f"""
+                **해석:** {target_time}의 예상 기온은 과거 유사 날짜·시간대 기준으로 약  
+                **{estimate['Estimated_Temperature']:.2f}°C**입니다.  
+                표준편차는 **{estimate['Std_Similar_Pattern']:.2f}°C**이므로,
+                실제 기온은 기압계·강수·바람 등 당시 조건에 따라 달라질 수 있습니다.
+                """
+            )
+
+            similar_sample = similar_sample.sort_values("일시").copy()
+
+            fig_pattern = px.scatter(
+                similar_sample,
+                x="일시",
+                y="기온(°C)",
+                color="Year" if "Year" in similar_sample.columns else None,
+                title="Historical Similar-Date Temperature Samples",
+                labels={"기온(°C)": "Temperature (°C)", "일시": "Historical Time"}
+            )
+            fig_pattern.add_hline(
+                y=estimate["Estimated_Temperature"],
+                line_dash="dash",
+                annotation_text="Estimated temperature"
+            )
+            st.plotly_chart(fig_pattern, use_container_width=True)
+
+            st.subheader("Similar Historical Samples")
+            display_cols = ["일시", "기온(°C)", "습도(%)", "풍속(m/s)", "강수량(mm)", "해면기압(hPa)"]
+            st.dataframe(similar_sample[display_cols].tail(300), use_container_width=True)
+
+            estimate_df = pd.DataFrame([estimate])
+            csv_estimate = estimate_df.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="Download seasonal estimate as CSV",
+                data=csv_estimate,
+                file_name="any_date_seasonal_temperature_estimate.csv",
+                mime="text/csv"
+            )
+
+            st.info(
+                "이 기능은 장기 실제 예보가 아니라 과거 패턴 기반 추정입니다. "
+                "예를 들어 2030년 8월 15일 14시를 선택하면, 과거 데이터에서 8월 15일 주변 날짜의 14시 기온 패턴을 이용해 예상값을 계산합니다."
+            )
+
+        except Exception as e:
+            st.error(f"Seasonal estimate failed: {e}")
+
 
 
 with tab_analysis:
