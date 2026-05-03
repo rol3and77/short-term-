@@ -1,0 +1,30 @@
+﻿Feature,Feature_English,Importance
+temp_diff_1h,Temperature Change 1h,0.6032218929219265
+hour_sin,Hour Sin,0.1565257361377521
+hour_cos,Hour Cos,0.07140228595058518
+temp_diff_3h,Temperature Change 3h,0.015517626894469227
+풍속(m/s),Wind Speed,0.015024005146657927
+humidity_rolling_3h,Humidity Rolling Mean 3h,0.011375797409006577
+humidity_1h_ago,Humidity 1h Ago,0.011359606683309218
+temp_std_6h,Temperature Std 6h,0.01116538496725617
+습도(%),Humidity,0.010444573896521198
+temp_1h_ago,Temperature 1h Ago,0.008999247852878497
+temp_48h_ago,Temperature 48h Ago,0.008347537073660006
+month_cos,Month Cos,0.008198318672947158
+pressure_diff_1h,Pressure Change 1h,0.007678318785554453
+wind_1h_ago,Wind Speed 1h Ago,0.0075934642971834665
+temp_24h_ago,Temperature 24h Ago,0.007586933928954436
+temp_12h_ago,Temperature 12h Ago,0.004638065459465651
+해면기압(hPa),Sea-Level Pressure,0.00398164820803291
+temp_rolling_6h,Temperature Rolling Mean 6h,0.0038932987920373635
+현지기압(hPa),Local Pressure,0.0038180475652808497
+temp_3h_ago,Temperature 3h Ago,0.0038017318620554583
+pressure_1h_ago,Pressure 1h Ago,0.003747109544381258
+month_sin,Month Sin,0.0035682383101776896
+temp_rolling_3h,Temperature Rolling Mean 3h,0.0035191153597666936
+temp_6h_ago,Temperature 6h Ago,0.0034534905840071643
+pressure_rolling_3h,Pressure Rolling Mean 3h,0.0032811041713282836
+기온(°C),Current Temperature,0.0032220776713784453
+강수량(mm),Rainfall,0.0020066132186850687
+season,Season,0.0019486002589611756
+rain_yesno,Rain Indicator,0.0006801283757797824
