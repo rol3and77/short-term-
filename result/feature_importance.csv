@@ -1,0 +1,23 @@
+﻿Feature,Importance,Feature_English
+기온(°C),0.9940405573279923,Current Temperature
+temp_diff_1h,0.0031464123024711028,Temperature Change 1h
+hour_cos,0.0007632510702357848,Hour Cos
+hour_sin,0.0006990595975278029,Hour Sin
+month_cos,0.0005197336287077335,Month Cos
+season,0.00024150838558641786,Season
+humidity_1h_ago,0.00016309187082707354,Humidity 1h Ago
+temp_diff_3h,0.00012434583452394028,Temperature Change 3h
+temp_6h_ago,9.088043100967527e-05,Temperature 6h Ago
+풍속(m/s),6.787655913535272e-05,Wind Speed
+temp_24h_ago,5.4621437722731784e-05,Temperature 24h Ago
+wind_1h_ago,2.6339017009974477e-05,Wind Speed 1h Ago
+month_sin,2.3508613067870503e-05,Month Sin
+temp_1h_ago,2.0612697278153797e-05,Temperature 1h Ago
+습도(%),7.108217975628143e-06,Humidity
+pressure_diff_1h,3.5297935127424945e-06,Pressure Change 1h
+해면기압(hPa),3.1130988716868037e-06,Sea-Level Pressure
+temp_3h_ago,2.6161085010074065e-06,Temperature 3h Ago
+현지기압(hPa),6.555073132514672e-07,Local Pressure
+pressure_1h_ago,6.146956076856823e-07,Pressure 1h Ago
+강수량(mm),3.7367279879137226e-07,Rainfall
+rain_yesno,1.901323231320725e-07,Rain Indicator
