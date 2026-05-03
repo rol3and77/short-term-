@@ -630,8 +630,8 @@ col4.metric("RMSE", f"{summary['rmse']:.3f} °C")
 
 st.divider()
 
-tab_overview, tab_results, tab_api, tab_analysis, tab_data = st.tabs(
-    ["Overview", "Model Results", "API Prediction", "Custom Analysis", "Data Preview"]
+tab_overview, tab_results, tab_api, tab_forecast, tab_analysis, tab_data = st.tabs(
+    ["Overview", "Model Results", "API Prediction", "Forecast Comparison", "Custom Analysis", "Data Preview"]
 )
 
 
@@ -870,6 +870,188 @@ with tab_api:
             except Exception as e:
                 st.error(f"API prediction failed: {e}")
 
+
+
+
+with tab_forecast:
+    st.subheader("Historical Forecast Comparison")
+    st.markdown(
+        """
+        과거 데이터의 특정 기간을 선택하면, 해당 시점마다 모델이 **1시간 뒤 기온을 예측**하고
+        실제 관측값과 비교합니다.  
+        즉, 과거 데이터를 이용한 **미래 예측 시뮬레이션(backtesting)** 기능입니다.
+        """
+    )
+
+    weather_forecast = pipeline["weather"].copy()
+    weather_forecast["일시"] = pd.to_datetime(weather_forecast["일시"])
+    weather_featured, target_change_col, actual_temp_col = add_features(weather_forecast, predict_hour=PREDICT_HOUR)
+    weather_featured = weather_featured.dropna().reset_index(drop=True)
+
+    weather_featured["Date"] = weather_featured["일시"].dt.date
+    weather_featured["Hour"] = weather_featured["일시"].dt.hour
+
+    min_date_fc = weather_featured["Date"].min()
+    max_date_fc = weather_featured["Date"].max()
+
+    fc1, fc2, fc3 = st.columns([1.4, 1.2, 1])
+
+    with fc1:
+        forecast_dates = st.date_input(
+            "Forecast comparison date range",
+            value=(max_date_fc - timedelta(days=7), max_date_fc),
+            min_value=min_date_fc,
+            max_value=max_date_fc,
+            help="모델 예측값과 실제 관측값을 비교할 날짜 범위를 선택하세요."
+        )
+
+    with fc2:
+        forecast_hours = st.slider(
+            "Base hour range",
+            min_value=0,
+            max_value=23,
+            value=(0, 23),
+            help="예측 기준 시각의 시간대를 선택하세요."
+        )
+
+    with fc3:
+        max_points = st.number_input(
+            "Max records",
+            min_value=50,
+            max_value=5000,
+            value=1000,
+            step=50,
+            help="그래프가 너무 무거워지지 않도록 표시할 최대 데이터 개수를 제한합니다."
+        )
+
+    if isinstance(forecast_dates, tuple) and len(forecast_dates) == 2:
+        fc_start_date, fc_end_date = forecast_dates
+    else:
+        fc_start_date = forecast_dates
+        fc_end_date = forecast_dates
+
+    fc_start_hour, fc_end_hour = forecast_hours
+
+    forecast_sample = weather_featured[
+        (weather_featured["Date"] >= fc_start_date)
+        & (weather_featured["Date"] <= fc_end_date)
+        & (weather_featured["Hour"] >= fc_start_hour)
+        & (weather_featured["Hour"] <= fc_end_hour)
+    ].copy()
+
+    if forecast_sample.empty:
+        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
+    else:
+        if len(forecast_sample) > max_points:
+            forecast_sample = forecast_sample.tail(int(max_points)).copy()
+
+        model = pipeline["model"]
+        feature_columns = pipeline["feature_columns"]
+
+        X_fc = forecast_sample[feature_columns]
+        predicted_change = model.predict(X_fc)
+        predicted_temp = forecast_sample["기온(°C)"].values + predicted_change
+
+        forecast_result = pd.DataFrame({
+            "Base_Time": forecast_sample["일시"].values,
+            "Prediction_Time": forecast_sample["일시"].values + np.array([np.timedelta64(PREDICT_HOUR, "h")] * len(forecast_sample)),
+            "Current_Temperature": forecast_sample["기온(°C)"].values,
+            "Actual_Future_Temperature": forecast_sample[actual_temp_col].values,
+            "Predicted_Future_Temperature": predicted_temp,
+            "Predicted_Change": predicted_change,
+        })
+
+        forecast_result["Error"] = (
+            forecast_result["Actual_Future_Temperature"]
+            - forecast_result["Predicted_Future_Temperature"]
+        )
+        forecast_result["Absolute_Error"] = np.abs(forecast_result["Error"])
+
+        fc_mae = mean_absolute_error(
+            forecast_result["Actual_Future_Temperature"],
+            forecast_result["Predicted_Future_Temperature"]
+        )
+        fc_rmse = np.sqrt(mean_squared_error(
+            forecast_result["Actual_Future_Temperature"],
+            forecast_result["Predicted_Future_Temperature"]
+        ))
+        fc_r2 = r2_score(
+            forecast_result["Actual_Future_Temperature"],
+            forecast_result["Predicted_Future_Temperature"]
+        )
+
+        fcm1, fcm2, fcm3, fcm4 = st.columns(4)
+        fcm1.metric("MAE", f"{fc_mae:.3f} °C")
+        fcm2.metric("RMSE", f"{fc_rmse:.3f} °C")
+        fcm3.metric("R²", f"{fc_r2:.4f}")
+        fcm4.metric("Records", f"{len(forecast_result):,}")
+
+        fig_fc = go.Figure()
+        fig_fc.add_trace(
+            go.Scatter(
+                x=forecast_result["Prediction_Time"],
+                y=forecast_result["Actual_Future_Temperature"],
+                mode="lines",
+                name="Actual Future Temperature"
+            )
+        )
+        fig_fc.add_trace(
+            go.Scatter(
+                x=forecast_result["Prediction_Time"],
+                y=forecast_result["Predicted_Future_Temperature"],
+                mode="lines",
+                name="Predicted Future Temperature"
+            )
+        )
+        fig_fc.update_layout(
+            title="Forecast Comparison: Actual vs Predicted Future Temperature",
+            xaxis_title="Prediction Time",
+            yaxis_title="Temperature (°C)"
+        )
+        st.plotly_chart(fig_fc, use_container_width=True)
+
+        fig_fc_scatter = px.scatter(
+            forecast_result,
+            x="Actual_Future_Temperature",
+            y="Predicted_Future_Temperature",
+            title="Forecast Comparison Scatter Plot",
+            labels={
+                "Actual_Future_Temperature": "Actual Future Temperature (°C)",
+                "Predicted_Future_Temperature": "Predicted Future Temperature (°C)"
+            }
+        )
+        st.plotly_chart(fig_fc_scatter, use_container_width=True)
+
+        fig_fc_error = px.line(
+            forecast_result,
+            x="Prediction_Time",
+            y="Error",
+            title="Forecast Error Over Time",
+            labels={"Error": "Error (Actual - Predicted)", "Prediction_Time": "Prediction Time"}
+        )
+        fig_fc_error.add_hline(y=0, line_dash="dash")
+        st.plotly_chart(fig_fc_error, use_container_width=True)
+
+        fig_fc_change = px.line(
+            forecast_result,
+            x="Prediction_Time",
+            y="Predicted_Change",
+            title="Predicted Temperature Change Over Time",
+            labels={"Predicted_Change": "Predicted Change (°C)", "Prediction_Time": "Prediction Time"}
+        )
+        fig_fc_change.add_hline(y=0, line_dash="dash")
+        st.plotly_chart(fig_fc_change, use_container_width=True)
+
+        st.subheader("Forecast Comparison Table")
+        st.dataframe(forecast_result.tail(300), use_container_width=True)
+
+        csv_forecast = forecast_result.to_csv(index=False, encoding="utf-8-sig")
+        st.download_button(
+            label="Download forecast comparison as CSV",
+            data=csv_forecast,
+            file_name="forecast_comparison.csv",
+            mime="text/csv"
+        )
 
 
 with tab_analysis:
