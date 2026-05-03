@@ -14,6 +14,11 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Graph text is intentionally kept in English to avoid font rendering issues
+# in Linux/GitHub Actions environments.
+plt.rcParams["font.family"] = "DejaVu Sans"
+plt.rcParams["axes.unicode_minus"] = False
+
 from joblib import dump
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
