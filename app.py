@@ -131,6 +131,39 @@ def load_model_bundle():
     return joblib.load(MODEL_PATH)
 
 
+def get_prediction_columns(prediction_df: pd.DataFrame):
+    """
+    Colab 코드 버전에 따라 예측 결과 컬럼명이 다를 수 있으므로
+    한국어/영어 컬럼명을 모두 지원한다.
+    """
+    if {"Actual_Temperature", "Predicted_Temperature"}.issubset(prediction_df.columns):
+        actual_col = "Actual_Temperature"
+        pred_col = "Predicted_Temperature"
+        error_col = "Error" if "Error" in prediction_df.columns else None
+        abs_error_col = "Absolute_Error" if "Absolute_Error" in prediction_df.columns else None
+        return actual_col, pred_col, error_col, abs_error_col
+
+    if {"실제_기온", "예측_기온"}.issubset(prediction_df.columns):
+        actual_col = "실제_기온"
+        pred_col = "예측_기온"
+        error_col = "오차" if "오차" in prediction_df.columns else None
+        abs_error_col = "절대오차" if "절대오차" in prediction_df.columns else None
+        return actual_col, pred_col, error_col, abs_error_col
+
+    raise KeyError(
+        "temperature_prediction_result.csv must include either "
+        "Actual_Temperature / Predicted_Temperature or 실제_기온 / 예측_기온 columns."
+    )
+
+
+def get_feature_name_column(feature_df: pd.DataFrame):
+    if "Feature_English" in feature_df.columns:
+        return "Feature_English"
+    if "Feature" in feature_df.columns:
+        return "Feature"
+    raise KeyError("feature_importance.csv must include Feature or Feature_English column.")
+
+
 def make_api_params(service_key: str):
     """
     ASOS 시간자료 API는 전날 자료까지 제공되므로
@@ -166,7 +199,7 @@ def request_asos_api(service_key: str, retry: int = 5, wait: int = 3):
     params, start_time, end_time = make_api_params(service_key)
     last_error = None
 
-    for attempt in range(1, retry + 1):
+    for _ in range(1, retry + 1):
         try:
             response = requests.get(
                 API_URL,
@@ -402,7 +435,7 @@ summary_df = load_csv(SUMMARY_PATH)
 summary = summary_df.iloc[0]
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Best Model", model_name)
+col1.metric("Deploy Model", model_name)
 col2.metric("Prediction Target", "1 hour later")
 col3.metric("MAE", f"{summary['mae']:.3f} °C")
 col4.metric("RMSE", f"{summary['rmse']:.3f} °C")
@@ -438,11 +471,18 @@ with tab_overview:
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Baseline RMSE", f"{summary['baseline_rmse']:.3f} °C")
-    c2.metric("Best Model RMSE", f"{summary['rmse']:.3f} °C")
+    c2.metric("Deploy Model RMSE", f"{summary['rmse']:.3f} °C")
     c3.metric("R²", f"{summary['r2']:.4f}")
 
-    st.info(
-        "ASOS 시간자료 API는 실시간 현재 자료가 아니라 전날 자료까지 제공됩니다. "
+    if "best_model" in summary and "deploy_model" in summary:
+        st.info(
+            f"Performance-best model: {summary['best_model']} / "
+            f"Deployment model: {summary['deploy_model']}. "
+            "The deployment model is selected considering GitHub and Streamlit file-size constraints."
+        )
+
+    st.warning(
+        "ASOS 시간자료 API는 실시간 현재 자료가 아니라 전날 자료까지 제공합니다. "
         "따라서 API 예측은 'API에서 제공되는 최신 관측 시각 기준 1시간 뒤 예측'으로 해석해야 합니다."
     )
 
@@ -479,11 +519,13 @@ with tab_results:
     prediction_df = load_csv(PREDICTION_PATH)
     prediction_df["일시"] = pd.to_datetime(prediction_df["일시"])
 
+    actual_col, pred_col, error_col, abs_error_col = get_prediction_columns(prediction_df)
+
     fig_line = go.Figure()
     fig_line.add_trace(
         go.Scatter(
             x=prediction_df["일시"],
-            y=prediction_df["실제_기온"],
+            y=prediction_df[actual_col],
             mode="lines",
             name="Actual Temperature",
         )
@@ -491,7 +533,7 @@ with tab_results:
     fig_line.add_trace(
         go.Scatter(
             x=prediction_df["일시"],
-            y=prediction_df["예측_기온"],
+            y=prediction_df[pred_col],
             mode="lines",
             name="Predicted Temperature",
         )
@@ -505,27 +547,57 @@ with tab_results:
 
     fig_scatter = px.scatter(
         prediction_df,
-        x="실제_기온",
-        y="예측_기온",
+        x=actual_col,
+        y=pred_col,
         title="Actual vs Predicted Scatter Plot",
-        labels={"실제_기온": "Actual Temperature (°C)", "예측_기온": "Predicted Temperature (°C)"},
+        labels={actual_col: "Actual Temperature (°C)", pred_col: "Predicted Temperature (°C)"},
     )
     st.plotly_chart(fig_scatter, use_container_width=True)
+
+    if error_col is not None:
+        st.subheader("Prediction Error Over Time")
+        fig_error = px.line(
+            prediction_df,
+            x="일시",
+            y=error_col,
+            title="Error Over Time",
+            labels={error_col: "Error (Actual - Predicted)", "일시": "Time"},
+        )
+        fig_error.add_hline(y=0, line_dash="dash")
+        st.plotly_chart(fig_error, use_container_width=True)
 
     if os.path.exists(FEATURE_PATH):
         st.subheader("Feature Importance")
         feature_df = load_csv(FEATURE_PATH)
+        feature_col = get_feature_name_column(feature_df)
         feature_df = feature_df.sort_values("Importance", ascending=False).head(15)
 
         fig_feature = px.bar(
             feature_df,
             x="Importance",
-            y="Feature",
+            y=feature_col,
             orientation="h",
             title="Top 15 Feature Importance",
         )
         fig_feature.update_layout(yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig_feature, use_container_width=True)
+
+        if "Feature" in feature_df.columns:
+            full_feature_df = load_csv(FEATURE_PATH)
+            feature_col_full = get_feature_name_column(full_feature_df)
+            no_current_temp = full_feature_df[full_feature_df["Feature"] != "기온(°C)"].copy()
+            no_current_temp = no_current_temp.sort_values("Importance", ascending=False).head(15)
+
+            st.subheader("Feature Importance Except Current Temperature")
+            fig_no_temp = px.bar(
+                no_current_temp,
+                x="Importance",
+                y=feature_col_full,
+                orientation="h",
+                title="Feature Importance Except Current Temperature",
+            )
+            fig_no_temp.update_layout(yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(fig_no_temp, use_container_width=True)
 
 
 # ============================================================
