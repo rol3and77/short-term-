@@ -630,8 +630,8 @@ col4.metric("RMSE", f"{summary['rmse']:.3f} °C")
 
 st.divider()
 
-tab_overview, tab_results, tab_api, tab_data = st.tabs(
-    ["Overview", "Model Results", "API Prediction", "Data Preview"]
+tab_overview, tab_results, tab_api, tab_analysis, tab_data = st.tabs(
+    ["Overview", "Model Results", "API Prediction", "Custom Analysis", "Data Preview"]
 )
 
 
@@ -869,6 +869,178 @@ with tab_api:
 
             except Exception as e:
                 st.error(f"API prediction failed: {e}")
+
+
+
+with tab_analysis:
+    st.subheader("Custom Temperature Analysis")
+    st.markdown(
+        """
+        원하는 날짜 범위와 시간대를 선택하면 해당 구간의 서울 기온 변화를 분석할 수 있습니다.
+        예를 들어, 최근 5년 동안 **새벽 0~6시**, **오후 12~18시**, **특정 월/계절**의 기온 패턴을 따로 볼 수 있습니다.
+        """
+    )
+
+    weather_analysis = pipeline["weather"].copy()
+    weather_analysis["일시"] = pd.to_datetime(weather_analysis["일시"])
+    weather_analysis["Date"] = weather_analysis["일시"].dt.date
+    weather_analysis["Hour"] = weather_analysis["일시"].dt.hour
+    weather_analysis["Month"] = weather_analysis["일시"].dt.month
+    weather_analysis["Year"] = weather_analysis["일시"].dt.year
+
+    min_date = weather_analysis["Date"].min()
+    max_date = weather_analysis["Date"].max()
+
+    c1, c2, c3 = st.columns([1.2, 1.2, 1])
+
+    with c1:
+        selected_dates = st.date_input(
+            "Date range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+            help="분석할 날짜 범위를 선택하세요."
+        )
+
+    with c2:
+        selected_hours = st.slider(
+            "Hour range",
+            min_value=0,
+            max_value=23,
+            value=(0, 23),
+            help="분석할 시간대를 선택하세요. 예: 0~6시는 새벽 시간대입니다."
+        )
+
+    with c3:
+        aggregation = st.selectbox(
+            "Aggregation",
+            ["Hourly records", "Daily average", "Monthly average", "Yearly average"],
+            help="그래프에 표시할 집계 단위를 선택하세요."
+        )
+
+    if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
+        start_date, end_date = selected_dates
+    else:
+        start_date = selected_dates
+        end_date = selected_dates
+
+    start_hour, end_hour = selected_hours
+
+    filtered = weather_analysis[
+        (weather_analysis["Date"] >= start_date)
+        & (weather_analysis["Date"] <= end_date)
+        & (weather_analysis["Hour"] >= start_hour)
+        & (weather_analysis["Hour"] <= end_hour)
+    ].copy()
+
+    if filtered.empty:
+        st.warning("선택한 조건에 해당하는 데이터가 없습니다. 날짜 범위나 시간대를 다시 선택하세요.")
+    else:
+        temp_col = "기온(°C)"
+
+        avg_temp = filtered[temp_col].mean()
+        min_temp = filtered[temp_col].min()
+        max_temp = filtered[temp_col].max()
+        std_temp = filtered[temp_col].std()
+        record_count = len(filtered)
+
+        min_row = filtered.loc[filtered[temp_col].idxmin()]
+        max_row = filtered.loc[filtered[temp_col].idxmax()]
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Average Temp", f"{avg_temp:.2f} °C")
+        m2.metric("Min Temp", f"{min_temp:.2f} °C")
+        m3.metric("Max Temp", f"{max_temp:.2f} °C")
+        m4.metric("Std Dev", f"{std_temp:.2f} °C")
+        m5.metric("Records", f"{record_count:,}")
+
+        st.caption(
+            f"Lowest: {min_row['일시']} / {min_row[temp_col]:.2f} °C  |  "
+            f"Highest: {max_row['일시']} / {max_row[temp_col]:.2f} °C"
+        )
+
+        # Time-series aggregation
+        if aggregation == "Hourly records":
+            plot_df = filtered[["일시", temp_col]].copy()
+            plot_df = plot_df.rename(columns={"일시": "Time", temp_col: "Temperature"})
+            fig = px.line(
+                plot_df,
+                x="Time",
+                y="Temperature",
+                title=f"Temperature Trend: {start_date} to {end_date}, {start_hour}:00–{end_hour}:00",
+                labels={"Temperature": "Temperature (°C)", "Time": "Time"}
+            )
+
+        elif aggregation == "Daily average":
+            plot_df = filtered.groupby("Date", as_index=False)[temp_col].mean()
+            plot_df = plot_df.rename(columns={"Date": "Time", temp_col: "Temperature"})
+            fig = px.line(
+                plot_df,
+                x="Time",
+                y="Temperature",
+                title=f"Daily Average Temperature: {start_hour}:00–{end_hour}:00",
+                labels={"Temperature": "Temperature (°C)", "Time": "Date"}
+            )
+
+        elif aggregation == "Monthly average":
+            filtered["YearMonth"] = filtered["일시"].dt.to_period("M").astype(str)
+            plot_df = filtered.groupby("YearMonth", as_index=False)[temp_col].mean()
+            plot_df = plot_df.rename(columns={"YearMonth": "Time", temp_col: "Temperature"})
+            fig = px.line(
+                plot_df,
+                x="Time",
+                y="Temperature",
+                title=f"Monthly Average Temperature: {start_hour}:00–{end_hour}:00",
+                labels={"Temperature": "Temperature (°C)", "Time": "Month"}
+            )
+
+        else:
+            plot_df = filtered.groupby("Year", as_index=False)[temp_col].mean()
+            plot_df = plot_df.rename(columns={"Year": "Time", temp_col: "Temperature"})
+            fig = px.bar(
+                plot_df,
+                x="Time",
+                y="Temperature",
+                title=f"Yearly Average Temperature: {start_hour}:00–{end_hour}:00",
+                labels={"Temperature": "Temperature (°C)", "Time": "Year"}
+            )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.subheader("Average Temperature by Hour")
+        hourly_avg = filtered.groupby("Hour", as_index=False)[temp_col].mean()
+        hourly_avg = hourly_avg.rename(columns={temp_col: "Average_Temperature"})
+
+        fig_hour = px.bar(
+            hourly_avg,
+            x="Hour",
+            y="Average_Temperature",
+            title="Average Temperature by Selected Hour Range",
+            labels={"Average_Temperature": "Average Temperature (°C)", "Hour": "Hour of Day"}
+        )
+        st.plotly_chart(fig_hour, use_container_width=True)
+
+        st.subheader("Temperature Distribution")
+        fig_hist = px.histogram(
+            filtered,
+            x=temp_col,
+            nbins=40,
+            title="Temperature Distribution in Selected Range",
+            labels={temp_col: "Temperature (°C)"}
+        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+        st.subheader("Filtered Data")
+        preview_cols = ["일시", "기온(°C)", "강수량(mm)", "풍속(m/s)", "습도(%)", "해면기압(hPa)"]
+        st.dataframe(filtered[preview_cols].tail(200), use_container_width=True)
+
+        csv_data = filtered[preview_cols].to_csv(index=False, encoding="utf-8-sig")
+        st.download_button(
+            label="Download filtered data as CSV",
+            data=csv_data,
+            file_name="custom_temperature_analysis.csv",
+            mime="text/csv"
+        )
 
 
 with tab_data:
